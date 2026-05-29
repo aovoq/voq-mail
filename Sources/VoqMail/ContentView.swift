@@ -36,12 +36,12 @@ struct WindowChromeConfigurator: NSViewRepresentable {
         window.titlebarAppearsTransparent = true
         window.styleMask.insert(.fullSizeContentView)
         window.isMovableByWindowBackground = true
-        window.isOpaque = true
-        window.backgroundColor = .windowBackgroundColor
+        window.isOpaque = false
+        window.backgroundColor = .clear
         window.contentView?.wantsLayer = true
-        window.contentView?.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        window.contentView?.layer?.backgroundColor = NSColor.clear.cgColor
         window.contentView?.superview?.wantsLayer = true
-        window.contentView?.superview?.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        window.contentView?.superview?.layer?.backgroundColor = NSColor.clear.cgColor
         window.toolbar = nil
 
         window.standardWindowButton(.closeButton)?.isHidden = false

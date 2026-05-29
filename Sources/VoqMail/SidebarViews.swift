@@ -27,9 +27,17 @@ struct CustomSplitDemo: View {
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            SidebarPaneSurface(sidebarWidth: currentSidebarWidth, radius: cornerRadius)
-                .fill(Color(nsColor: .windowBackgroundColor))
+            VisualEffectBackground(material: .sidebar, blendingMode: .behindWindow)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .mask(
+                    SidebarPaneSurface(sidebarWidth: currentSidebarWidth, radius: currentCornerRadius)
+                        .fill(Color.black)
+                )
                 .opacity(showsSidebar ? 1 : 0)
+                .allowsHitTesting(false)
+
+            DetailPaneSurface(sidebarWidth: currentSidebarWidth, radius: currentCornerRadius)
+                .fill(Color(nsColor: .windowBackgroundColor))
                 .allowsHitTesting(false)
 
             HStack(spacing: 0) {
@@ -40,10 +48,9 @@ struct CustomSplitDemo: View {
 
                 MailboxDetail(mailbox: selectedMailbox)
                     .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color(nsColor: .windowBackgroundColor).ignoresSafeArea())
             }
 
-            SidebarRightBorder(sidebarWidth: currentSidebarWidth, radius: cornerRadius)
+            SidebarRightBorder(sidebarWidth: currentSidebarWidth, radius: currentCornerRadius)
                 .stroke(
                     Color(red: 0.902, green: 0.902, blue: 0.902),
                     style: StrokeStyle(lineWidth: 1, lineCap: .butt, lineJoin: .round)
@@ -69,6 +76,10 @@ struct CustomSplitDemo: View {
 
     private var currentSidebarWidth: CGFloat {
         showsSidebar ? sidebarWidth : 0
+    }
+
+    private var currentCornerRadius: CGFloat {
+        min(cornerRadius, currentSidebarWidth)
     }
 }
 
@@ -105,14 +116,14 @@ struct VisualEffectBackground: NSViewRepresentable {
         let view = NSVisualEffectView()
         view.material = material
         view.blendingMode = blendingMode
-        view.state = .active
+        view.state = .followsWindowActiveState
         return view
     }
 
     func updateNSView(_ view: NSVisualEffectView, context: Context) {
         view.material = material
         view.blendingMode = blendingMode
-        view.state = .active
+        view.state = .followsWindowActiveState
     }
 }
 
@@ -186,6 +197,33 @@ struct SidebarPaneSurface: Shape {
             control: CGPoint(x: x, y: rect.maxY)
         )
         path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+        path.closeSubpath()
+        return path
+    }
+}
+
+struct DetailPaneSurface: Shape {
+    let sidebarWidth: CGFloat
+    let radius: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        let x = rect.minX + sidebarWidth
+        let clampedRadius = min(radius, rect.maxX - x, rect.height / 2)
+
+        var path = Path()
+        path.move(to: CGPoint(x: x + clampedRadius, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+        path.addLine(to: CGPoint(x: x + clampedRadius, y: rect.maxY))
+        path.addQuadCurve(
+            to: CGPoint(x: x, y: rect.maxY - clampedRadius),
+            control: CGPoint(x: x, y: rect.maxY)
+        )
+        path.addLine(to: CGPoint(x: x, y: rect.minY + clampedRadius))
+        path.addQuadCurve(
+            to: CGPoint(x: x + clampedRadius, y: rect.minY),
+            control: CGPoint(x: x, y: rect.minY)
+        )
         path.closeSubpath()
         return path
     }
