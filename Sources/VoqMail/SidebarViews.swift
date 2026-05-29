@@ -24,62 +24,78 @@ struct CustomSplitDemo: View {
     @State private var showsSidebar = true
     private let sidebarWidth = 220.0
     private let cornerRadius = 24.0
+    private let sidebarAnimation = Animation.spring(response: 0.32, dampingFraction: 0.9, blendDuration: 0.04)
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            VisualEffectBackground(material: .sidebar, blendingMode: .behindWindow)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .mask(
-                    SidebarPaneSurface(sidebarWidth: currentSidebarWidth, radius: currentCornerRadius)
-                        .fill(Color.black)
-                )
-                .opacity(showsSidebar ? 1 : 0)
-                .allowsHitTesting(false)
+            sidebarLayer
 
-            DetailPaneSurface(sidebarWidth: currentSidebarWidth, radius: currentCornerRadius)
+            DetailPaneSurface(sidebarWidth: currentDetailLeadingEdge, radius: currentCornerRadius)
                 .fill(Color(nsColor: .windowBackgroundColor))
                 .allowsHitTesting(false)
+                .zIndex(1)
 
             HStack(spacing: 0) {
-                CustomSidebarList(selection: $selection)
-                    .frame(width: currentSidebarWidth)
-                    .opacity(showsSidebar ? 1 : 0)
-                    .clipped()
+                Rectangle()
+                    .fill(Color.clear)
+                    .frame(width: currentDetailLeadingEdge)
+                    .allowsHitTesting(false)
 
                 MailboxDetail(mailbox: selectedMailbox)
                     .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
             }
+            .zIndex(2)
 
-            SidebarRightBorder(sidebarWidth: currentSidebarWidth, radius: currentCornerRadius)
+            SidebarRightBorder(sidebarWidth: currentDetailLeadingEdge, radius: currentCornerRadius)
                 .stroke(
                     Color(red: 0.902, green: 0.902, blue: 0.902),
                     style: StrokeStyle(lineWidth: 1, lineCap: .butt, lineJoin: .round)
                 )
                 .opacity(showsSidebar ? 1 : 0)
                 .allowsHitTesting(false)
+                .zIndex(3)
 
             SidebarToggleButton(isExpanded: showsSidebar) {
-                withAnimation(.easeInOut(duration: 0.22)) {
+                withAnimation(sidebarAnimation) {
                     showsSidebar.toggle()
                 }
             }
             .padding(.top, 11)
             .padding(.leading, 78)
+            .zIndex(4)
         }
-        .animation(.easeInOut(duration: 0.22), value: currentSidebarWidth)
+        .animation(sidebarAnimation, value: currentDetailLeadingEdge)
         .ignoresSafeArea(.container, edges: .top)
+    }
+
+    private var sidebarLayer: some View {
+        ZStack(alignment: .topLeading) {
+            VisualEffectBackground(material: .sidebar, blendingMode: .behindWindow)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .mask(
+                    SidebarPaneSurface(sidebarWidth: sidebarWidth, radius: cornerRadius)
+                        .fill(Color.black)
+                )
+                .allowsHitTesting(false)
+
+            CustomSidebarList(selection: $selection)
+                .frame(width: sidebarWidth)
+                .clipped()
+        }
+        .allowsHitTesting(showsSidebar)
+        .zIndex(0)
     }
 
     private var selectedMailbox: Mailbox? {
         Mailbox.samples.first { $0.id == selection }
     }
 
-    private var currentSidebarWidth: CGFloat {
+    private var currentDetailLeadingEdge: CGFloat {
         showsSidebar ? sidebarWidth : 0
     }
 
     private var currentCornerRadius: CGFloat {
-        min(cornerRadius, currentSidebarWidth)
+        min(cornerRadius, currentDetailLeadingEdge)
     }
 }
 
@@ -177,12 +193,20 @@ struct CustomSidebarList: View {
 }
 
 struct SidebarPaneSurface: Shape {
-    let sidebarWidth: CGFloat
-    let radius: CGFloat
+    var sidebarWidth: CGFloat
+    var radius: CGFloat
+
+    var animatableData: AnimatablePair<CGFloat, CGFloat> {
+        get { AnimatablePair(sidebarWidth, radius) }
+        set {
+            sidebarWidth = newValue.first
+            radius = newValue.second
+        }
+    }
 
     func path(in rect: CGRect) -> Path {
         let x = rect.minX + sidebarWidth
-        let clampedRadius = min(radius, rect.maxX - x, rect.height / 2)
+        let clampedRadius = max(0, min(radius, rect.maxX - x, rect.height / 2))
 
         var path = Path()
         path.move(to: CGPoint(x: rect.minX, y: rect.minY))
@@ -203,12 +227,20 @@ struct SidebarPaneSurface: Shape {
 }
 
 struct DetailPaneSurface: Shape {
-    let sidebarWidth: CGFloat
-    let radius: CGFloat
+    var sidebarWidth: CGFloat
+    var radius: CGFloat
+
+    var animatableData: AnimatablePair<CGFloat, CGFloat> {
+        get { AnimatablePair(sidebarWidth, radius) }
+        set {
+            sidebarWidth = newValue.first
+            radius = newValue.second
+        }
+    }
 
     func path(in rect: CGRect) -> Path {
         let x = rect.minX + sidebarWidth
-        let clampedRadius = min(radius, rect.maxX - x, rect.height / 2)
+        let clampedRadius = max(0, min(radius, rect.maxX - x, rect.height / 2))
 
         var path = Path()
         path.move(to: CGPoint(x: x + clampedRadius, y: rect.minY))
@@ -230,12 +262,20 @@ struct DetailPaneSurface: Shape {
 }
 
 struct SidebarRightBorder: Shape {
-    let sidebarWidth: CGFloat
-    let radius: CGFloat
+    var sidebarWidth: CGFloat
+    var radius: CGFloat
+
+    var animatableData: AnimatablePair<CGFloat, CGFloat> {
+        get { AnimatablePair(sidebarWidth, radius) }
+        set {
+            sidebarWidth = newValue.first
+            radius = newValue.second
+        }
+    }
 
     func path(in rect: CGRect) -> Path {
         let x = rect.minX + sidebarWidth
-        let clampedRadius = min(radius, rect.maxX - x, rect.height / 2)
+        let clampedRadius = max(0, min(radius, rect.maxX - x, rect.height / 2))
 
         var path = Path()
         path.move(to: CGPoint(x: x + clampedRadius, y: rect.minY))
@@ -336,7 +376,7 @@ struct CustomSidebarRow: View {
         }
         .foregroundStyle(.primary)
         .padding(.horizontal, 10)
-        .frame(height: 28)
+        .frame(maxWidth: .infinity, minHeight: 28, maxHeight: 28, alignment: .leading)
         .background {
             RoundedRectangle(cornerRadius: 6)
                 .fill(
@@ -345,6 +385,7 @@ struct CustomSidebarRow: View {
                         : Color.clear)
         }
         .padding(.horizontal, 8)
+        .contentShape(Rectangle())
     }
 }
 

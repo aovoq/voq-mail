@@ -63,9 +63,9 @@ struct WindowChromeConfigurator: NSViewRepresentable {
     private func positionTrafficLights(in window: NSWindow) {
         let topInset: CGFloat = 16
         let buttons: [(NSWindow.ButtonType, CGFloat)] = [
-            (.closeButton, 15),
-            (.miniaturizeButton, 35),
-            (.zoomButton, 55)
+            (.closeButton, 16),
+            (.miniaturizeButton, 38),
+            (.zoomButton, 60)
         ]
 
         for (type, x) in buttons {
