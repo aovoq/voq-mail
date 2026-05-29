@@ -23,10 +23,40 @@ struct MailMessage: Identifiable, Hashable {
     let mailboxID: String
 
     static let samples: [MailMessage] = [
-        MailMessage(id: "1", sender: "Mina", subject: "Design pass", preview: "The sidebar options are ready to compare.", mailboxID: "inbox"),
-        MailMessage(id: "2", sender: "Theo", subject: "Build notes", preview: "SwiftPM bundle launch works cleanly now.", mailboxID: "inbox"),
-        MailMessage(id: "3", sender: "Ari", subject: "Draft copy", preview: "Keeping the first screen quiet and useful.", mailboxID: "drafts"),
-        MailMessage(id: "4", sender: "Voq", subject: "Sent sample", preview: "A sent message preview for the middle column.", mailboxID: "sent"),
-        MailMessage(id: "5", sender: "System", subject: "Archived thread", preview: "Older conversation moved out of the inbox.", mailboxID: "archive")
+        MailMessage(
+            id: "1",
+            sender: "Mina",
+            subject: "Design pass",
+            preview: "The sidebar options are ready to compare.",
+            mailboxID: "inbox"
+        ),
+        MailMessage(
+            id: "2",
+            sender: "Theo",
+            subject: "Build notes",
+            preview: "SwiftPM bundle launch works cleanly now.",
+            mailboxID: "inbox"
+        ),
+        MailMessage(
+            id: "3",
+            sender: "Ari",
+            subject: "Draft copy",
+            preview: "Keeping the first screen quiet and useful.",
+            mailboxID: "drafts"
+        ),
+        MailMessage(
+            id: "4",
+            sender: "Voq",
+            subject: "Sent sample",
+            preview: "A sent message preview for the middle column.",
+            mailboxID: "sent"
+        ),
+        MailMessage(
+            id: "5",
+            sender: "System",
+            subject: "Archived thread",
+            preview: "Older conversation moved out of the inbox.",
+            mailboxID: "archive"
+        )
     ]
 }
