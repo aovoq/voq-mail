@@ -22,10 +22,10 @@ struct WindowChromeConfigurator: NSViewRepresentable {
 
     final class Coordinator {
         private weak var configuredWindow: NSWindow?
-        private var observers: [NSObjectProtocol] = []
+        private var trafficLightConstraints: [NSLayoutConstraint] = []
 
         deinit {
-            observers.forEach(NotificationCenter.default.removeObserver)
+            resetTrafficLightConstraints()
         }
 
         func configure(window: NSWindow?) {
@@ -49,70 +49,49 @@ struct WindowChromeConfigurator: NSViewRepresentable {
             window.standardWindowButton(.zoomButton)?.isHidden = false
 
             if configuredWindow !== window {
-                observe(window: window)
+                resetTrafficLightConstraints()
                 configuredWindow = window
             }
 
-            positionTrafficLights(in: window)
-            scheduleTrafficLightPositioning(in: window)
+            pinTrafficLights(in: window)
         }
 
-        private func observe(window: NSWindow) {
-            observers.forEach(NotificationCenter.default.removeObserver)
-            observers = [
-                NotificationCenter.default.addObserver(
-                    forName: NSWindow.didResizeNotification,
-                    object: window,
-                    queue: .main
-                ) { [weak self, weak window] _ in
-                    guard let window else { return }
-                    self?.scheduleTrafficLightPositioning(in: window)
-                },
-                NotificationCenter.default.addObserver(
-                    forName: NSWindow.didEndLiveResizeNotification,
-                    object: window,
-                    queue: .main
-                ) { [weak self, weak window] _ in
-                    guard let window else { return }
-                    self?.scheduleTrafficLightPositioning(in: window)
-                },
-            ]
+        private func resetTrafficLightConstraints() {
+            NSLayoutConstraint.deactivate(trafficLightConstraints)
+            trafficLightConstraints = []
         }
 
-        private func scheduleTrafficLightPositioning(in window: NSWindow) {
-            for delay in [0, 0.1, 0.35] {
-                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak window] in
-                    guard let window else { return }
-                    Self.positionTrafficLights(in: window)
+        private func pinTrafficLights(in window: NSWindow) {
+            guard trafficLightConstraints.isEmpty else { return }
+
+            let buttons = TrafficLightLayout.buttons.compactMap { type, leading in
+                window.standardWindowButton(type).flatMap { button -> (NSButton, CGFloat, NSView)? in
+                    guard let superview = button.superview else { return nil }
+                    return (button, leading, superview)
                 }
             }
-        }
 
-        private func positionTrafficLights(in window: NSWindow) {
-            Self.positionTrafficLights(in: window)
-        }
+            guard buttons.count == TrafficLightLayout.buttons.count else { return }
 
-        private static func positionTrafficLights(in window: NSWindow) {
-            let topInset: CGFloat = 16
-            let buttons: [(NSWindow.ButtonType, CGFloat)] = [
-                (.closeButton, 16),
-                (.miniaturizeButton, 38),
-                (.zoomButton, 60),
-            ]
-
-            for (type, x) in buttons {
-                guard
-                    let button = window.standardWindowButton(type),
-                    let superview = button.superview
-                else {
-                    continue
-                }
-
-                var frame = button.frame
-                frame.origin.x = x
-                frame.origin.y = superview.bounds.height - topInset - frame.height
-                button.frame = frame
+            for (button, leading, superview) in buttons {
+                button.translatesAutoresizingMaskIntoConstraints = false
+                trafficLightConstraints.append(contentsOf: [
+                    button.leadingAnchor.constraint(equalTo: superview.leadingAnchor, constant: leading),
+                    button.topAnchor.constraint(equalTo: superview.topAnchor, constant: TrafficLightLayout.topInset),
+                ])
             }
+
+            NSLayoutConstraint.activate(trafficLightConstraints)
+            window.contentView?.superview?.layoutSubtreeIfNeeded()
         }
     }
+}
+
+private enum TrafficLightLayout {
+    static let topInset: CGFloat = 16
+    static let buttons: [(NSWindow.ButtonType, CGFloat)] = [
+        (.closeButton, 16),
+        (.miniaturizeButton, 38),
+        (.zoomButton, 60),
+    ]
 }
