@@ -1,62 +1,41 @@
+//
+//  SidebarColorCalibration.swift
+//  VoqMail
+//
+//  The Core Image filter pipeline that tints the sidebar's NSVisualEffectView
+//  material into the exact appearance the app wants. `VisualEffectStyle`
+//  (in VisualEffectBackground.swift) plugs `SidebarMaterialCalibration.makeFilters`
+//  into the view as its content filters.
+//
+//  ⚠️ The float constants below are EMPIRICALLY CALIBRATED against reference
+//  screenshots. They look arbitrary but every digit matters: rounding, reordering,
+//  or "simplifying" any value will change the rendered sidebar color. Treat this
+//  whole file as read-only unless you are deliberately re-deriving the look.
+//
+
 import AppKit
 import CoreImage
-import SwiftUI
 
-struct VisualEffectBackground: NSViewRepresentable {
-    let style: VisualEffectStyle
+// MARK: - Filter pipeline
 
-    init(style: VisualEffectStyle) {
-        self.style = style
-    }
-
-    func makeNSView(context: Context) -> NSVisualEffectView {
-        let view = NSVisualEffectView()
-        configure(view)
-        return view
-    }
-
-    func updateNSView(_ view: NSVisualEffectView, context: Context) {
-        configure(view)
-    }
-
-    private func configure(_ view: NSVisualEffectView) {
-        view.material = style.material
-        view.blendingMode = style.blendingMode
-        view.state = style.state
-        view.appearance = style.appearanceName.flatMap(NSAppearance.init(named:))
-        view.isEmphasized = style.isEmphasized
-        view.contentFilters = style.contentFilters()
-    }
-}
-
-struct VisualEffectStyle {
-    let material: NSVisualEffectView.Material
-    let blendingMode: NSVisualEffectView.BlendingMode
-    let state: NSVisualEffectView.State
-    let appearanceName: NSAppearance.Name?
-    let isEmphasized: Bool
-    let contentFilters: () -> [CIFilter]
-
-    static let calibratedSidebar = VisualEffectStyle(
-        material: .titlebar,
-        blendingMode: .behindWindow,
-        state: .followsWindowActiveState,
-        appearanceName: .aqua,
-        isEmphasized: false,
-        contentFilters: SidebarMaterialCalibration.makeFilters
-    )
-}
-
-private enum SidebarMaterialCalibration {
+/// Builds the ordered list of filters that turns the base titlebar material into
+/// the calibrated sidebar tint. Order is significant — each stage feeds the next.
+enum SidebarMaterialCalibration {
     static func makeFilters() -> [CIFilter] {
         [
+            // 1. Desaturate and very slightly darken the base material.
             colorControls(saturation: 0.45, brightness: -0.012),
+            // 2. Pull the colors toward the target response curve, then fine-tune.
             ColorResponse.sidebarTarget.filter,
             ColorResponse.sidebarFineTune.filter,
+            // 3. Apply the primary color matrix that defines the sidebar hue.
             ColorMatrix.sidebarFourPointTarget.filter,
         ].compactMap { $0 } + sRGBPostCalibrationFilters()
     }
 
+    /// A final pass run in sRGB-gamma space. The two matrix tweaks are wrapped in
+    /// a linear→sRGB→linear "sandwich" so they operate on gamma-encoded colors,
+    /// which is where the calibration was measured.
     private static func sRGBPostCalibrationFilters() -> [CIFilter] {
         [
             CIFilter(name: "CILinearToSRGBToneCurve"),
@@ -75,6 +54,10 @@ private enum SidebarMaterialCalibration {
     }
 }
 
+// MARK: - Calibrated constants (do not edit)
+
+/// A 3×3 color transform plus a bias offset, expressed as a `CIColorMatrix`.
+/// Each static value is a calibrated stage in the pipeline above.
 private struct ColorMatrix {
     let redVector: CIVector
     let greenVector: CIVector
@@ -114,6 +97,8 @@ private struct ColorMatrix {
     }
 }
 
+/// A "lift + bias" color response per channel, also realized as a `CIColorMatrix`.
+/// `lift` mixes a channel toward/away from red, `bias` adds a constant offset.
 private struct ColorResponse {
     let redLift: CGFloat
     let greenLift: CGFloat

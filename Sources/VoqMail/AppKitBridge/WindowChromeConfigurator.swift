@@ -1,3 +1,15 @@
+//
+//  WindowChromeConfigurator.swift
+//  VoqMail
+//
+//  An AppKit bridge that customizes the host `NSWindow`: it hides the title bar,
+//  makes the background transparent so the app's own chrome shows through, and
+//  pins the traffic-light buttons (close / minimize / zoom) to fixed positions.
+//
+//  Used by ContentView as a transparent `.background`, purely for its side effect
+//  of reaching the window. It draws nothing itself.
+//
+
 import AppKit
 import SwiftUI
 
@@ -6,6 +18,9 @@ struct WindowChromeConfigurator: NSViewRepresentable {
         Coordinator()
     }
 
+    // The window isn't attached yet while `makeNSView` runs, so we hop to the next
+    // main-loop tick (`DispatchQueue.main.async`) by which time `view.window` exists.
+    // `configure` is idempotent, so re-running it on every SwiftUI update is safe.
     func makeNSView(context: Context) -> NSView {
         let view = NSView()
         DispatchQueue.main.async {
@@ -20,6 +35,10 @@ struct WindowChromeConfigurator: NSViewRepresentable {
         }
     }
 
+    // MARK: - Coordinator
+
+    /// Holds state that must survive across SwiftUI updates: which window we have
+    /// already configured, and the traffic-light constraints we installed.
     final class Coordinator {
         private weak var configuredWindow: NSWindow?
         private var trafficLightConstraints: [NSLayoutConstraint] = []
@@ -28,6 +47,8 @@ struct WindowChromeConfigurator: NSViewRepresentable {
             resetTrafficLightConstraints()
         }
 
+        /// Applies the chrome. Safe to call repeatedly — the window properties are
+        /// simply re-set, and the traffic lights are only re-pinned when needed.
         func configure(window: NSWindow?) {
             guard let window else { return }
 
@@ -38,6 +59,8 @@ struct WindowChromeConfigurator: NSViewRepresentable {
             window.isMovableByWindowBackground = true
             window.isOpaque = false
             window.backgroundColor = .clear
+            // Both the content view and the theme frame above it need a transparent
+            // layer; otherwise an opaque system background can show through.
             window.contentView?.wantsLayer = true
             window.contentView?.layer?.backgroundColor = NSColor.clear.cgColor
             window.contentView?.superview?.wantsLayer = true
@@ -48,6 +71,8 @@ struct WindowChromeConfigurator: NSViewRepresentable {
             window.standardWindowButton(.miniaturizeButton)?.isHidden = false
             window.standardWindowButton(.zoomButton)?.isHidden = false
 
+            // If the window changed (e.g. a new window), drop the old constraints so
+            // they get re-created for the new one.
             if configuredWindow !== window {
                 resetTrafficLightConstraints()
                 configuredWindow = window
@@ -61,6 +86,9 @@ struct WindowChromeConfigurator: NSViewRepresentable {
             trafficLightConstraints = []
         }
 
+        /// Pins the three traffic-light buttons to their custom positions.
+        /// The `isEmpty` guard makes this run only once per window, so repeated
+        /// updates don't stack duplicate constraints.
         private func pinTrafficLights(in window: NSWindow) {
             guard trafficLightConstraints.isEmpty else { return }
 
@@ -71,6 +99,7 @@ struct WindowChromeConfigurator: NSViewRepresentable {
                 }
             }
 
+            // Only proceed once every expected button is present.
             guard buttons.count == TrafficLightLayout.buttons.count else { return }
 
             for (button, leading, superview) in buttons {
@@ -87,6 +116,12 @@ struct WindowChromeConfigurator: NSViewRepresentable {
     }
 }
 
+// MARK: - Traffic-light layout
+
+/// Where the standard window buttons sit, measured from the top-left of the
+/// title-bar area. These are visually calibrated to the app's custom chrome; the
+/// sidebar toggle button (`Metrics.toggleButtonLeadingPadding`) is positioned to
+/// clear them.
 private enum TrafficLightLayout {
     static let topInset: CGFloat = 16
     static let buttons: [(NSWindow.ButtonType, CGFloat)] = [

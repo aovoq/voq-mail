@@ -1,11 +1,17 @@
+//
+//  SampleData.swift
+//  VoqMail
+//
+//  Placeholder demo data standing in for a real mail backend. The mailboxes and
+//  messages are defined together in one file because of an invariant they share:
+//  every `MailMessage.mailboxID` must match some `Mailbox.id`. Keeping both lists
+//  here makes that relationship easy to see and keep in sync.
+//
+
 import Foundation
 
-struct Mailbox: Identifiable, Hashable {
-    let id: String
-    let title: String
-    let systemImage: String
-    let count: Int?
-
+extension Mailbox {
+    /// Demo mailboxes shown in the sidebar.
     static let samples: [Mailbox] = [
         Mailbox(id: "inbox", title: "Inbox", systemImage: "tray.fill", count: 12),
         Mailbox(id: "sent", title: "Sent", systemImage: "paperplane.fill", count: nil),
@@ -15,13 +21,8 @@ struct Mailbox: Identifiable, Hashable {
     ]
 }
 
-struct MailMessage: Identifiable, Hashable {
-    let id: String
-    let sender: String
-    let subject: String
-    let preview: String
-    let mailboxID: String
-
+extension MailMessage {
+    /// Demo messages. Each `mailboxID` matches a `Mailbox.id` defined above.
     static let samples: [MailMessage] = [
         MailMessage(
             id: "1",
