@@ -3,8 +3,7 @@
 //  VoqMail
 //
 //  A list of message previews (sender, subject, snippet) with a bound selection.
-//  Currently exercised only by the reference three-column demo
-//  (see Reference/DemoViews.swift), not by the running app's main layout.
+//  Used by both the running three-pane mail layout and the reference demo views.
 //
 
 import SwiftUI
@@ -14,22 +13,48 @@ struct MessageList: View {
     @Binding var selection: MailMessage.ID?
 
     var body: some View {
-        List(selection: $selection) {
-            ForEach(messages) { message in
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(message.sender)
-                        .font(.headline)
-                        .lineLimit(1)
-                    Text(message.subject)
-                        .lineLimit(1)
-                    Text(message.preview)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
+        Group {
+            if messages.isEmpty {
+                ContentUnavailableView("No Messages", systemImage: "tray")
+            } else {
+                List(selection: $selection) {
+                    ForEach(messages) { message in
+                        MessageRow(message: message)
+                            .tag(message.id)
+                    }
                 }
-                .padding(.vertical, 4)
-                .tag(message.id)
             }
         }
+    }
+}
+
+private struct MessageRow: View {
+    let message: MailMessage
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack {
+                Text(message.sender)
+                    .font(.headline)
+                    .lineLimit(1)
+
+                Spacer()
+
+                Text(message.receivedAt, style: .time)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Text(message.subject)
+                .fontWeight(message.isRead ? .regular : .semibold)
+                .lineLimit(1)
+
+            Text(message.preview)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+        }
+        .padding(.vertical, 5)
+        .contentShape(Rectangle())
     }
 }

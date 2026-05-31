@@ -2,28 +2,37 @@
 //  MessageDetail.swift
 //  VoqMail
 //
-//  The full view of one message: subject, sender, and body — or a neutral
-//  empty state when nothing is selected. Currently exercised only by the
-//  reference three-column demo (see Reference/DemoViews.swift).
+//  The right-hand detail pane for the selected message. It composes the message
+//  header, HTML body, and optional attachments without owning mailbox selection.
 //
 
 import SwiftUI
 
 struct MessageDetail: View {
     let message: MailMessage?
+    var onReply: (MailMessage) -> Void = { _ in }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        Group {
             if let message {
-                Text(message.subject)
-                    .font(.largeTitle.weight(.semibold))
-                Text("From \(message.sender)")
-                    .font(.title3)
-                    .foregroundStyle(.secondary)
-                Divider()
-                Text(message.preview)
-                    .font(.body)
-                Spacer()
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 14) {
+                        MessageHeaderView(message: message, onReply: onReply)
+
+                        Divider()
+
+                        HTMLMailView(html: message.htmlBody)
+                            .frame(minHeight: 260)
+
+                        if !message.attachments.isEmpty {
+                            Divider()
+                            MessageAttachmentsView(attachments: message.attachments)
+                        }
+                    }
+                    .padding(24)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             } else {
                 ContentUnavailableView(
                     "No Message",
@@ -32,7 +41,6 @@ struct MessageDetail: View {
                 )
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .padding(28)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
