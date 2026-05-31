@@ -25,7 +25,7 @@ struct MainMailSplitView: View {
     //
     //   zIndex 0  sidebarLayer   – blurred sidebar material + the mailbox list
     //   zIndex 1  detail fill    – opaque rounded shape that "carves" the seam
-    //   zIndex 2  detailLayer    – the detail pane content, offset by the sidebar
+    //   zIndex 2  detailLayer    – the detail content, clipped to the same seam
     //   zIndex 3  sidebarBorder  – hairline stroke tracing the seam
     //   zIndex 4  toggle button  – always on top so it stays clickable
     var body: some View {
@@ -38,6 +38,7 @@ struct MainMailSplitView: View {
                 .zIndex(1)
 
             detailLayer
+                .clipShape(DetailPaneSurface(sidebarWidth: currentDetailLeadingEdge, radius: currentCornerRadius))
                 .zIndex(2)
 
             sidebarBorder
