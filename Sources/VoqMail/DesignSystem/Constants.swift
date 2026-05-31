@@ -18,8 +18,18 @@ import SwiftUI
 /// Sizes and spacing for the main split layout and the sidebar.
 enum Metrics {
     /// Width of the sidebar pane. The sidebar's background mask and its list frame
-    /// must use the SAME width, so they both read this single value.
+    /// use this as their initial value before the user resizes the pane.
     static let sidebarWidth: CGFloat = 220
+    /// Narrowest sidebar width preserved after a non-collapsing resize.
+    static let sidebarMinWidth: CGFloat = 180
+    /// Widest sidebar width allowed during resize.
+    static let sidebarMaxWidth: CGFloat = 320
+    /// Raw drag width below this threshold auto-hides the sidebar.
+    /// Values from this threshold up to `sidebarMinWidth` intentionally snap to
+    /// the minimum width instead of collapsing, keeping resize intent forgiving.
+    static let sidebarAutoCollapseWidth: CGFloat = 100
+    /// Invisible hit target width centered on the curved seam.
+    static let sidebarResizeHitWidth: CGFloat = 14
 
     /// Corner radius of the curved seam between the sidebar and the detail pane.
     static let cornerRadius: CGFloat = 24

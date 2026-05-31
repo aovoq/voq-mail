@@ -16,6 +16,7 @@ struct SidebarToggleButton: View {
     @State private var isHovered = false
 
     private var label: String { isExpanded ? "Hide Sidebar" : "Show Sidebar" }
+    private var helpText: String { "\(label) (⌘B)" }
 
     var body: some View {
         Image(systemName: "sidebar.left")
@@ -41,7 +42,7 @@ struct SidebarToggleButton: View {
                 DragGesture(minimumDistance: 0).onEnded { _ in action() }
             )
             .onHover { isHovered = $0 }
-            .help(label)
+            .help(helpText)
             .accessibilityElement()
             .accessibilityAddTraits(.isButton)
             .accessibilityLabel(label)

@@ -9,8 +9,15 @@
 import SwiftUI
 
 struct ContentView: View {
+    let sidebarModel: SidebarModel
+
+    init(sidebarModel: SidebarModel = SidebarModel()) {
+        self.sidebarModel = sidebarModel
+    }
+
     var body: some View {
         MainMailSplitView()
+            .environment(sidebarModel)
             // WindowChromeConfigurator renders nothing; it is attached only for its
             // side effect of reaching and configuring the enclosing NSWindow.
             .background(WindowChromeConfigurator())

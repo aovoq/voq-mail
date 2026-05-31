@@ -15,14 +15,21 @@ import SwiftUI
 struct VoqMailApp: App {
     // Bridges an AppKit application delegate into the SwiftUI app lifecycle.
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    @State private var sidebarModel = SidebarModel()
 
     var body: some Scene {
         WindowGroup("") {
-            ContentView()
+            ContentView(sidebarModel: sidebarModel)
                 .frame(minWidth: WindowMetrics.minSize.width, minHeight: WindowMetrics.minSize.height)
         }
         .defaultSize(width: WindowMetrics.defaultSize.width, height: WindowMetrics.defaultSize.height)
         .windowStyle(.hiddenTitleBar)
+        .commands {
+            CommandGroup(after: .toolbar) {
+                Button("Toggle Sidebar", action: sidebarModel.toggleAnimated)
+                    .keyboardShortcut("b", modifiers: .command)
+            }
+        }
     }
 }
 
