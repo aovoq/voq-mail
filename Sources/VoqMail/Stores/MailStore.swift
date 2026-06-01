@@ -99,6 +99,42 @@ final class MailStore {
             errorMessage = String(describing: error)
         }
     }
+
+    /// Flips the read state of a message, or no-ops if it is already in `read`.
+    func toggleRead(messageID: MailMessage.ID, token: @escaping @Sendable () async throws -> String) async {
+        guard let message = messages.first(where: { $0.id == messageID }) else { return }
+        await setRead(!message.isRead, messageID: messageID, token: token)
+    }
+
+    /// Sets a message read or unread by adding/removing Gmail's `UNREAD` label. The
+    /// UI updates optimistically (bold flips immediately); a failed modify rolls the
+    /// label set back. A no-op when the message is already in the requested state.
+    func setRead(_ read: Bool, messageID: MailMessage.ID, token: @escaping @Sendable () async throws -> String) async {
+        guard let index = messages.firstIndex(where: { $0.id == messageID }),
+              messages[index].isRead != read else { return }
+
+        let previous = messages[index].labelIds
+        messages[index].labelIds = read
+            ? previous.filter { $0 != "UNREAD" }
+            : previous + ["UNREAD"]
+
+        do {
+            let accessToken = try await token()
+            try await client.modifyLabels(
+                messageID: messageID,
+                addLabelIDs: read ? [] : ["UNREAD"],
+                removeLabelIDs: read ? ["UNREAD"] : [],
+                accessToken: accessToken)
+        } catch {
+            // A cancellation (the message was deselected before the modify returned)
+            // leaves the optimistic state in place rather than reverting it.
+            guard !isCancellation(error) else { return }
+            if let index = messages.firstIndex(where: { $0.id == messageID }) {
+                messages[index].labelIds = previous
+            }
+            errorMessage = String(describing: error)
+        }
+    }
 }
 
 /// Whether an error is a cancellation — expected when a mailbox/message switch

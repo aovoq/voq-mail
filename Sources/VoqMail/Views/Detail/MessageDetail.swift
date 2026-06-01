@@ -16,13 +16,14 @@ struct MessageDetail: View {
     var isLoadingContent: Bool = false
     var downloadingAttachmentIDs: Set<String> = []
     var onReply: (MailMessage) -> Void = { _ in }
+    var onToggleRead: (MailMessage) -> Void = { _ in }
     var onPreviewAttachment: (MailAttachment) -> Void = { _ in }
 
     var body: some View {
         Group {
             if let message {
                 VStack(spacing: 0) {
-                    MessageHeaderView(message: message, onReply: onReply)
+                    MessageHeaderView(message: message, onReply: onReply, onToggleRead: onToggleRead)
                         .padding(.horizontal, 24)
                         .padding(.top, 24)
                         .padding(.bottom, 14)

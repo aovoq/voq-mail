@@ -77,6 +77,9 @@ struct MailboxDetail: View {
                             isLoadingContent: contentStore.isLoading,
                             downloadingAttachmentIDs: contentStore.downloadingAttachmentIDs,
                             onReply: { reply(to: $0) },
+                            onToggleRead: { message in
+                                Task { await toggleRead(message) }
+                            },
                             onPreviewAttachment: { attachment in
                                 Task { await downloadAttachment(attachment) }
                             })
@@ -149,7 +152,20 @@ struct MailboxDetail: View {
     private func loadSelectedContent() async {
         guard let message = selectedMessage,
               let account = accountStore.accounts.first else { return }
+        // Opening a message marks it read; the user can flip it back from the header.
+        if !message.isRead {
+            await mailStore.setRead(true, messageID: message.id) {
+                try await accountStore.accessToken(for: account.email)
+            }
+        }
         await contentStore.load(message: message) {
+            try await accountStore.accessToken(for: account.email)
+        }
+    }
+
+    private func toggleRead(_ message: MailMessage) async {
+        guard let account = accountStore.accounts.first else { return }
+        await mailStore.toggleRead(messageID: message.id) {
             try await accountStore.accessToken(for: account.email)
         }
     }

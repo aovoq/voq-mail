@@ -36,7 +36,7 @@ extension MailMessage {
                 body: "The original sidebar stays intact. This message body is rendered through WebKit so HTML mail can be shown in the detail pane."
             ),
             receivedAt: Date(timeIntervalSinceNow: -900),
-            isRead: false,
+            labelIds: ["UNREAD"],
             mailboxID: "inbox"
         ),
         MailMessage(
@@ -51,7 +51,6 @@ extension MailMessage {
                 body: "SwiftPM bundle launch works cleanly now. The detail pane now supports message selection, HTML rendering, attachments, and replies."
             ),
             receivedAt: Date(timeIntervalSinceNow: -3_600),
-            isRead: true,
             attachments: [
                 MailAttachment(id: "attachment-1", filename: "sync-plan.txt", byteCount: 1_840, contentType: "text/plain", localFileURL: nil)
             ],
@@ -65,7 +64,7 @@ extension MailMessage {
             subject: "Draft copy",
             preview: "Keeping the first screen quiet and useful.",
             receivedAt: Date(timeIntervalSinceNow: -7_200),
-            isRead: false,
+            labelIds: ["UNREAD"],
             mailboxID: "drafts"
         ),
         MailMessage(
