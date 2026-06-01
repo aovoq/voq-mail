@@ -38,8 +38,10 @@ final class LabelStore {
             // The list endpoint omits counts, so fetch them only for what we show.
             let detailed = try await client.labels(
                 ids: displayed.map(\.id), concurrency: 5, accessToken: accessToken)
+            // Use the thread (conversation) count so the badge matches Gmail's own
+            // UI, which counts unread conversations rather than unread messages.
             let unreadByID = Dictionary(
-                detailed.map { ($0.id, $0.messagesUnread ?? 0) },
+                detailed.map { ($0.id, $0.threadsUnread ?? 0) },
                 uniquingKeysWith: { first, _ in first })
             mailboxes = Self.mailboxes(from: displayed, unreadByID: unreadByID)
         } catch {
