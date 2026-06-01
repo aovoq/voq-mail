@@ -11,6 +11,7 @@ import SwiftUI
 
 struct CustomSidebarList: View {
     @Binding var selection: Mailbox.ID?
+    @Environment(MailStore.self) private var mailStore
 
     var body: some View {
         // Mailbox list scrolls; the account footer stays pinned to the bottom.
@@ -29,7 +30,9 @@ struct CustomSidebarList: View {
                         Button {
                             selection = mailbox.id
                         } label: {
-                            CustomSidebarRow(mailbox: mailbox, isSelected: selection == mailbox.id)
+                            CustomSidebarRow(
+                                mailbox: displayMailbox(mailbox),
+                                isSelected: selection == mailbox.id)
                         }
                         .buttonStyle(.plain)
                     }
@@ -44,5 +47,16 @@ struct CustomSidebarList: View {
             AccountStatusView()
         }
         .ignoresSafeArea(.container, edges: .top)
+    }
+
+    /// Replaces the INBOX row's static sample badge with the live unread count.
+    private func displayMailbox(_ mailbox: Mailbox) -> Mailbox {
+        guard mailbox.id == "inbox" else { return mailbox }
+        let unread = mailStore.inboxUnreadCount
+        return Mailbox(
+            id: mailbox.id,
+            title: mailbox.title,
+            systemImage: mailbox.systemImage,
+            count: unread == 0 ? nil : unread)
     }
 }
