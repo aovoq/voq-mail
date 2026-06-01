@@ -19,6 +19,9 @@ struct VoqMailApp: App {
     @State private var accountStore = AccountStore()
     @State private var mailStore = MailStore()
     @State private var labelStore = LabelStore()
+    // Held here (rather than locally in MailboxDetail) so account removal can purge
+    // its per-account content via the environment (issue #8).
+    @State private var contentStore = MessageContentStore()
 
     var body: some Scene {
         WindowGroup("") {
@@ -26,7 +29,8 @@ struct VoqMailApp: App {
                 sidebarModel: sidebarModel,
                 accountStore: accountStore,
                 mailStore: mailStore,
-                labelStore: labelStore)
+                labelStore: labelStore,
+                contentStore: contentStore)
                 .frame(minWidth: WindowMetrics.minSize.width, minHeight: WindowMetrics.minSize.height)
         }
         .defaultSize(width: WindowMetrics.defaultSize.width, height: WindowMetrics.defaultSize.height)

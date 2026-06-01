@@ -89,7 +89,8 @@ extension MailMessage {
     /// Maps a fetched Gmail message into a list-row `MailMessage`. Body and
     /// attachments are not fetched in this slice (issue #5); the preview uses the
     /// API snippet and the HTML body defaults to a plain-text rendering of it.
-    init(gmail: GmailMessage, mailboxID: String) {
+    /// `accountID` tags the message with the account it was fetched from.
+    init(gmail: GmailMessage, accountID: String, mailboxID: String) {
         let headers = Dictionary(
             (gmail.payload?.headers ?? []).map { ($0.name.lowercased(), $0.value) },
             uniquingKeysWith: { first, _ in first })
@@ -111,7 +112,8 @@ extension MailMessage {
             receivedAt: Self.date(fromInternalDate: gmail.internalDate),
             labelIds: gmail.labelIds ?? [],
             attachments: [],
-            mailboxID: mailboxID
+            mailboxID: mailboxID,
+            accountID: accountID
         )
     }
 

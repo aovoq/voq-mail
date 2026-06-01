@@ -15,6 +15,13 @@ actor TokenProvider {
     private let keychain = KeychainTokenStore()
     private var cache: [String: AccessToken] = [:]
 
+    /// Drops the cached access token for `email`. Called when an account is
+    /// removed so a deleted account's in-memory token cannot survive and cause a
+    /// stale request if the account is later re-added.
+    func clearCache(for email: String) {
+        cache[email] = nil
+    }
+
     /// Seeds an access token obtained out of band (e.g. right after sign-in),
     /// avoiding an immediate refresh.
     func store(_ response: TokenResponse, for email: String) {
