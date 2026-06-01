@@ -16,10 +16,11 @@ struct VoqMailApp: App {
     // Bridges an AppKit application delegate into the SwiftUI app lifecycle.
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var sidebarModel = SidebarModel()
+    @State private var accountStore = AccountStore()
 
     var body: some Scene {
         WindowGroup("") {
-            ContentView(sidebarModel: sidebarModel)
+            ContentView(sidebarModel: sidebarModel, accountStore: accountStore)
                 .frame(minWidth: WindowMetrics.minSize.width, minHeight: WindowMetrics.minSize.height)
         }
         .defaultSize(width: WindowMetrics.defaultSize.width, height: WindowMetrics.defaultSize.height)
