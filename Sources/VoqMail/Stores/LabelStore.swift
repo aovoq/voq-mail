@@ -23,6 +23,10 @@ final class LabelStore {
     /// launch without one's guard dropping the other.
     private var loadingAccountIDs: Set<String> = []
     private var errorsByAccount: [String: String] = [:]
+    /// Per-account load generation, bumped by `purge`. A load captures it at start
+    /// and writes its result only if it still matches, so a load suspended at an
+    /// await when the account is removed cannot resurrect the deleted labels.
+    private var loadGenerationByAccount: [String: Int] = [:]
 
     private let client = GmailClient()
 
@@ -41,11 +45,13 @@ final class LabelStore {
         errorsByAccount[accountID]
     }
 
-    /// Drops an account's labels (used when the account is removed).
+    /// Drops an account's labels (used when the account is removed). Bumping the
+    /// generation makes any in-flight load for this account no-op on completion.
     func purge(accountID: String) {
         mailboxesByAccount[accountID] = nil
         loadingAccountIDs.remove(accountID)
         errorsByAccount[accountID] = nil
+        loadGenerationByAccount[accountID, default: 0] &+= 1
     }
 
     /// Loads one account's labels and their unread counts. `token` supplies a
@@ -56,6 +62,7 @@ final class LabelStore {
         guard !loadingAccountIDs.contains(accountID) else { return }
         loadingAccountIDs.insert(accountID)
         errorsByAccount[accountID] = nil
+        let generation = loadGenerationByAccount[accountID] ?? 0
         defer { loadingAccountIDs.remove(accountID) }
 
         do {
@@ -70,9 +77,13 @@ final class LabelStore {
             let unreadByID = Dictionary(
                 detailed.map { ($0.id, $0.threadsUnread ?? 0) },
                 uniquingKeysWith: { first, _ in first })
+            // The account may have been removed (and re-added) while we awaited;
+            // only write back if this load hasn't been superseded.
+            guard (loadGenerationByAccount[accountID] ?? 0) == generation else { return }
             mailboxesByAccount[accountID] = Self.mailboxes(
                 from: displayed, unreadByID: unreadByID, accountID: accountID)
         } catch {
+            guard (loadGenerationByAccount[accountID] ?? 0) == generation else { return }
             errorsByAccount[accountID] = String(describing: error)
         }
     }
