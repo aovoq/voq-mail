@@ -56,6 +56,22 @@ struct GmailClient {
         return try JSONDecoder().decode(GmailMessage.self, from: data)
     }
 
+    /// Adds and/or removes labels on one message (`users.messages.modify`). Used to
+    /// toggle read state via the `UNREAD` label. Either list may be empty.
+    func modifyLabels(
+        messageID: String, addLabelIDs: [String], removeLabelIDs: [String], accessToken: String
+    ) async throws {
+        let url = URL(string: "\(Self.usersBase)/messages/\(messageID)/modify")!
+        let body = try JSONEncoder().encode(
+            ModifyRequest(addLabelIds: addLabelIDs, removeLabelIds: removeLabelIDs))
+        _ = try await post(url, body: body, accessToken: accessToken)
+    }
+
+    private struct ModifyRequest: Encodable {
+        let addLabelIds: [String]
+        let removeLabelIds: [String]
+    }
+
     /// Raw bytes of one attachment, base64url-decoded.
     func attachmentData(
         messageID: String, attachmentId: String, accessToken: String
@@ -150,7 +166,19 @@ struct GmailClient {
     }
 
     private func get(_ url: URL, accessToken: String) async throws -> Data {
+        try await send(URLRequest(url: url), accessToken: accessToken)
+    }
+
+    private func post(_ url: URL, body: Data, accessToken: String) async throws -> Data {
         var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = body
+        return try await send(request, accessToken: accessToken)
+    }
+
+    private func send(_ request: URLRequest, accessToken: String) async throws -> Data {
+        var request = request
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse,

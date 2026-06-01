@@ -18,10 +18,16 @@ struct MailMessage: Identifiable, Hashable {
     let preview: String
     let htmlBody: String
     let receivedAt: Date
-    let isRead: Bool
+    /// The Gmail label ids on this message. Read state is derived from these (the
+    /// `UNREAD` label) rather than stored, so a label toggle flips `isRead`. Kept
+    /// mutable so the store can update it optimistically.
+    var labelIds: [String]
     let attachments: [MailAttachment]
     /// Links this message to its `Mailbox.id`.
     let mailboxID: String
+
+    /// True unless the message still carries Gmail's `UNREAD` label.
+    var isRead: Bool { !labelIds.contains("UNREAD") }
 
     init(
         id: String,
@@ -32,7 +38,7 @@ struct MailMessage: Identifiable, Hashable {
         preview: String,
         htmlBody: String? = nil,
         receivedAt: Date = Date(),
-        isRead: Bool = true,
+        labelIds: [String] = [],
         attachments: [MailAttachment] = [],
         mailboxID: String
     ) {
@@ -44,7 +50,7 @@ struct MailMessage: Identifiable, Hashable {
         self.preview = preview
         self.htmlBody = htmlBody ?? Self.plainTextHTML(from: preview)
         self.receivedAt = receivedAt
-        self.isRead = isRead
+        self.labelIds = labelIds
         self.attachments = attachments
         self.mailboxID = mailboxID
     }
@@ -80,7 +86,7 @@ extension MailMessage {
             preview: preview,
             htmlBody: htmlBody,
             receivedAt: receivedAt,
-            isRead: isRead,
+            labelIds: labelIds,
             attachments: attachments,
             mailboxID: mailboxID)
     }

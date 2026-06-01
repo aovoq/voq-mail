@@ -109,7 +109,7 @@ extension MailMessage {
             preview: gmail.snippet ?? "",
             htmlBody: nil,
             receivedAt: Self.date(fromInternalDate: gmail.internalDate),
-            isRead: !(gmail.labelIds?.contains("UNREAD") ?? false),
+            labelIds: gmail.labelIds ?? [],
             attachments: [],
             mailboxID: mailboxID
         )

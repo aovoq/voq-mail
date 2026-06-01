@@ -10,6 +10,7 @@ import SwiftUI
 struct MessageHeaderView: View {
     let message: MailMessage
     let onReply: (MailMessage) -> Void
+    var onToggleRead: (MailMessage) -> Void = { _ in }
 
     var body: some View {
         HStack(alignment: .firstTextBaseline) {
@@ -27,6 +28,14 @@ struct MessageHeaderView: View {
             }
 
             Spacer()
+
+            Button {
+                onToggleRead(message)
+            } label: {
+                Label(
+                    message.isRead ? "Mark Unread" : "Mark Read",
+                    systemImage: message.isRead ? "envelope.badge" : "envelope.open")
+            }
 
             Button {
                 onReply(message)
