@@ -14,9 +14,12 @@ struct MainMailSplitView: View {
     // MARK: - State
 
     @Environment(SidebarModel.self) private var sidebarModel
+    @Environment(AccountStore.self) private var accountStore
+    @Environment(LabelStore.self) private var labelStore
 
-    /// Which mailbox is selected in the sidebar.
-    @State private var selection: Mailbox.ID? = Mailbox.samples.first?.id
+    /// Which mailbox is selected in the sidebar. Resolved against the loaded Gmail
+    /// labels; defaults to the Inbox once labels arrive.
+    @State private var selection: Mailbox.ID?
 
     // MARK: - Body
 
@@ -54,12 +57,29 @@ struct MainMailSplitView: View {
                 .zIndex(5)
         }
         .ignoresSafeArea(.container, edges: .top)
+        // Load the account's labels once it is signed in / restored.
+        .task(id: accountStore.accounts.first?.id) { await loadLabelsIfNeeded() }
+        // Default to the Inbox (or the first label) once labels populate, and keep
+        // the selection valid if the label set changes underneath it.
+        .onChange(of: labelStore.mailboxes) { _, mailboxes in
+            if selection == nil || !mailboxes.contains(where: { $0.id == selection }) {
+                selection = mailboxes.first(where: { $0.gmailLabelID == "INBOX" })?.id
+                    ?? mailboxes.first?.id
+            }
+        }
     }
 
     // MARK: - Selection
 
     private var selectedMailbox: Mailbox? {
-        Mailbox.sample(for: selection)
+        labelStore.mailboxes.first { $0.id == selection }
+    }
+
+    private func loadLabelsIfNeeded() async {
+        guard let account = accountStore.accounts.first else { return }
+        await labelStore.loadLabels {
+            try await accountStore.accessToken(for: account.email)
+        }
     }
 
     // MARK: - Animated geometry

@@ -61,6 +61,11 @@ enum Metrics {
     static let sidebarRowCornerRadius: CGFloat = 6
     static let sidebarRowIconWidth: CGFloat = 18
     static let sidebarHeaderTopPadding: CGFloat = 44
+    /// Per-level indent for nested user labels in the sidebar hierarchy.
+    static let sidebarIndentWidth: CGFloat = 14
+    /// Width reserved at a row's leading edge for the disclosure chevron (or its
+    /// spacer), so every row's icon lines up whether or not it has children.
+    static let sidebarDisclosureWidth: CGFloat = 12
 }
 
 // MARK: - Motion

@@ -71,10 +71,15 @@ struct GmailLabelList: Decodable {
     let labels: [GmailLabel]?
 }
 
+/// A Gmail label. `users.labels.list` populates only id/name/type; the unread and
+/// total counts are filled in only by `users.labels.get` (issue #6 fetches those
+/// per displayed label), so the count fields are optional.
 struct GmailLabel: Decodable {
     let id: String
     let name: String
     let type: String?
+    let messagesUnread: Int?
+    let messagesTotal: Int?
 }
 
 extension MailMessage {

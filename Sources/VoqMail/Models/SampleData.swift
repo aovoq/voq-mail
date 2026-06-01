@@ -13,11 +13,11 @@ import Foundation
 extension Mailbox {
     /// Demo mailboxes shown in the sidebar.
     static let samples: [Mailbox] = [
-        Mailbox(id: "inbox", title: "Inbox", systemImage: "tray.fill", count: 12),
-        Mailbox(id: "sent", title: "Sent", systemImage: "paperplane.fill", count: nil),
-        Mailbox(id: "drafts", title: "Drafts", systemImage: "doc.fill", count: 3),
-        Mailbox(id: "archive", title: "Archive", systemImage: "archivebox.fill", count: nil),
-        Mailbox(id: "trash", title: "Trash", systemImage: "trash.fill", count: nil)
+        Mailbox(id: "inbox", title: "Inbox", systemImage: "tray.fill", gmailLabelID: "INBOX", isSystem: true, parentID: nil, unreadCount: 12),
+        Mailbox(id: "sent", title: "Sent", systemImage: "paperplane.fill", gmailLabelID: "SENT", isSystem: true, parentID: nil, unreadCount: nil),
+        Mailbox(id: "drafts", title: "Drafts", systemImage: "doc.fill", gmailLabelID: "DRAFT", isSystem: true, parentID: nil, unreadCount: 3),
+        Mailbox(id: "archive", title: "Archive", systemImage: "archivebox.fill", gmailLabelID: "ARCHIVE", isSystem: true, parentID: nil, unreadCount: nil),
+        Mailbox(id: "trash", title: "Trash", systemImage: "trash.fill", gmailLabelID: "TRASH", isSystem: true, parentID: nil, unreadCount: nil)
     ]
 }
 
