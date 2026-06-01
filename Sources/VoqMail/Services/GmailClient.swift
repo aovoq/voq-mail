@@ -15,18 +15,23 @@ struct GmailClient {
 
     private static let usersBase = "https://gmail.googleapis.com/gmail/v1/users/me"
 
-    /// Ids of the newest messages carrying the given label.
+    /// One page of message ids carrying the given label, plus the token for the
+    /// next page (`nil` when the label has no more messages). `pageToken` requests
+    /// a specific page; pass `nil` for the first.
     func listMessageIDs(
-        labelID: String, maxResults: Int, accessToken: String
-    ) async throws -> [String] {
+        labelID: String, maxResults: Int, pageToken: String?, accessToken: String
+    ) async throws -> (ids: [String], nextPageToken: String?) {
         var components = URLComponents(string: "\(Self.usersBase)/messages")!
         components.queryItems = [
             .init(name: "labelIds", value: labelID),
             .init(name: "maxResults", value: String(maxResults)),
         ]
+        if let pageToken {
+            components.queryItems?.append(.init(name: "pageToken", value: pageToken))
+        }
         let data = try await get(components.url!, accessToken: accessToken)
-        return try JSONDecoder().decode(GmailMessageList.self, from: data).messages?
-            .map(\.id) ?? []
+        let list = try JSONDecoder().decode(GmailMessageList.self, from: data)
+        return (list.messages?.map(\.id) ?? [], list.nextPageToken)
     }
 
     /// Metadata for one message (From/To/Subject/Date headers + snippet + labels).
@@ -92,14 +97,17 @@ struct GmailClient {
         let size: Int?
     }
 
-    /// Lists a label's newest messages and fetches each one's metadata, capped at
-    /// `concurrency` in-flight requests. Results preserve the list order.
+    /// Lists one page of a label's messages and fetches each one's metadata, capped
+    /// at `concurrency` in-flight requests. Results preserve the list order; the
+    /// returned token feeds the next `messages(…)` call (`nil` when exhausted).
     func messages(
-        labelID: String, maxResults: Int, concurrency: Int, accessToken: String
-    ) async throws -> [GmailMessage] {
-        let ids = try await listMessageIDs(
-            labelID: labelID, maxResults: maxResults, accessToken: accessToken)
-        return try await metadata(for: ids, concurrency: concurrency, accessToken: accessToken)
+        labelID: String, maxResults: Int, pageToken: String?, concurrency: Int, accessToken: String
+    ) async throws -> (messages: [GmailMessage], nextPageToken: String?) {
+        let page = try await listMessageIDs(
+            labelID: labelID, maxResults: maxResults, pageToken: pageToken, accessToken: accessToken)
+        let messages = try await metadata(
+            for: page.ids, concurrency: concurrency, accessToken: accessToken)
+        return (messages, page.nextPageToken)
     }
 
     private func metadata(

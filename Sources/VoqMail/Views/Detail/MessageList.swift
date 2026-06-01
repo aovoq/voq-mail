@@ -11,6 +11,12 @@ import SwiftUI
 struct MessageList: View {
     let messages: [MailMessage]
     @Binding var selection: MailMessage.ID?
+    /// Whether another page can be appended; shows the load-more footer when true.
+    var canLoadMore: Bool = false
+    /// True while the next page is being fetched (drives the footer spinner).
+    var isLoadingMore: Bool = false
+    /// Requests the next page (tapped, or auto-fired when the footer scrolls in).
+    var onLoadMore: () -> Void = {}
 
     var body: some View {
         Group {
@@ -22,9 +28,33 @@ struct MessageList: View {
                         MessageRow(message: message)
                             .tag(message.id)
                     }
+
+                    if canLoadMore {
+                        loadMoreFooter
+                    }
                 }
             }
         }
+    }
+
+    /// A footer that both auto-loads the next page when scrolled into view and
+    /// offers an explicit tap, showing a spinner while the page is in flight.
+    private var loadMoreFooter: some View {
+        Button(action: onLoadMore) {
+            HStack {
+                Spacer()
+                if isLoadingMore {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Text("Load More").font(.callout)
+                }
+                Spacer()
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(isLoadingMore)
+        .listRowSeparator(.hidden)
+        .onAppear(perform: onLoadMore)
     }
 }
 

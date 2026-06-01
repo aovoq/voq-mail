@@ -110,7 +110,12 @@ struct MailboxDetail: View {
 
     /// The message list with INBOX loading/error feedback layered on top.
     private var messageListColumn: some View {
-        MessageList(messages: messages, selection: $selectedMessageID)
+        MessageList(
+            messages: messages,
+            selection: $selectedMessageID,
+            canLoadMore: mailStore.canLoadMore,
+            isLoadingMore: mailStore.isLoadingMore,
+            onLoadMore: { Task { await loadMore() } })
             .overlay {
                 if mailStore.isLoading && messages.isEmpty {
                     ProgressView()
@@ -130,6 +135,13 @@ struct MailboxDetail: View {
     private func loadMessagesIfNeeded() async {
         guard let mailbox, let account = accountStore.accounts.first else { return }
         await mailStore.load(mailbox: mailbox) {
+            try await accountStore.accessToken(for: account.email)
+        }
+    }
+
+    private func loadMore() async {
+        guard let account = accountStore.accounts.first else { return }
+        await mailStore.loadMore {
             try await accountStore.accessToken(for: account.email)
         }
     }
