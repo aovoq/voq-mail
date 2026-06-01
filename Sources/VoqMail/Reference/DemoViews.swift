@@ -1,5 +1,15 @@
+//
+//  DemoViews.swift
+//  VoqMail — Reference (not used by the running app)
+//
+//  Alternative layouts kept for learning and comparison. The running app uses
+//  `MainMailSplitView` (Views/MainLayout); these demos show simpler two- and
+//  three-column arrangements built from the same components. Nothing references them.
+//
+
 import SwiftUI
 
+/// Reference: a plain two-column sidebar + detail layout, without the animated seam.
 struct NativeTwoColumnDemo: View {
     @State private var selection: Mailbox.ID? = Mailbox.samples.first?.id
 
@@ -14,10 +24,12 @@ struct NativeTwoColumnDemo: View {
     }
 
     private var selectedMailbox: Mailbox? {
-        Mailbox.samples.first { $0.id == selection }
+        Mailbox.sample(for: selection)
     }
 }
 
+/// Reference: a three-column layout — mailboxes, the selected mailbox's messages,
+/// and the selected message — showing how the detail components compose.
 struct ThreeColumnDemo: View {
     @State private var mailboxSelection: Mailbox.ID? = Mailbox.samples.first?.id
     @State private var messageSelection: MailMessage.ID? = MailMessage.samples.first?.id
@@ -33,13 +45,14 @@ struct ThreeColumnDemo: View {
             MessageDetail(message: selectedMessage)
                 .frame(minWidth: 360, maxWidth: .infinity, maxHeight: .infinity)
         }
+        // When the mailbox changes, reset the message selection to its first message.
         .onChange(of: mailboxSelection) { _, _ in
             messageSelection = messages.first?.id
         }
     }
 
     private var messages: [MailMessage] {
-        MailMessage.samples.filter { $0.mailboxID == mailboxSelection }
+        MailMessage.samples(in: mailboxSelection)
     }
 
     private var selectedMessage: MailMessage? {

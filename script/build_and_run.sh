@@ -3,8 +3,12 @@ set -euo pipefail
 
 MODE="${1:-run}"
 APP_NAME="VoqMail"
-BUNDLE_ID="com.aovoq.VoqMail"
+BUNDLE_ID="work.aovoq.voqmail"
 MIN_SYSTEM_VERSION="14.0"
+# Reversed client ID of the iOS OAuth client (issue #1). Registered below as a
+# custom URL scheme so ASWebAuthenticationSession can receive the redirect.
+# Mirror of OAuthConfiguration.redirectScheme — keep the two in sync.
+OAUTH_REDIRECT_SCHEME="com.googleusercontent.apps.1023809986523-4os0v0qhf63kp1l25k1ifotj88fcltgb"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST_DIR="$ROOT_DIR/dist"
@@ -43,6 +47,17 @@ cat >"$INFO_PLIST" <<PLIST
   <string>$MIN_SYSTEM_VERSION</string>
   <key>NSPrincipalClass</key>
   <string>NSApplication</string>
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLName</key>
+      <string>$BUNDLE_ID.oauth</string>
+      <key>CFBundleURLSchemes</key>
+      <array>
+        <string>$OAUTH_REDIRECT_SCHEME</string>
+      </array>
+    </dict>
+  </array>
 </dict>
 </plist>
 PLIST
