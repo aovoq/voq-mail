@@ -18,13 +18,15 @@ struct VoqMailApp: App {
     @State private var sidebarModel = SidebarModel()
     @State private var accountStore = AccountStore()
     @State private var mailStore = MailStore()
+    @State private var labelStore = LabelStore()
 
     var body: some Scene {
         WindowGroup("") {
             ContentView(
                 sidebarModel: sidebarModel,
                 accountStore: accountStore,
-                mailStore: mailStore)
+                mailStore: mailStore,
+                labelStore: labelStore)
                 .frame(minWidth: WindowMetrics.minSize.width, minHeight: WindowMetrics.minSize.height)
         }
         .defaultSize(width: WindowMetrics.defaultSize.width, height: WindowMetrics.defaultSize.height)

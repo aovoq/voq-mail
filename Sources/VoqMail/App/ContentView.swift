@@ -12,12 +12,14 @@ struct ContentView: View {
     let sidebarModel: SidebarModel
     let accountStore: AccountStore
     let mailStore: MailStore
+    let labelStore: LabelStore
 
     var body: some View {
         MainMailSplitView()
             .environment(sidebarModel)
             .environment(accountStore)
             .environment(mailStore)
+            .environment(labelStore)
             // WindowChromeConfigurator renders nothing; it is attached only for its
             // side effect of reaching and configuring the enclosing NSWindow.
             .background(WindowChromeConfigurator())
@@ -32,5 +34,6 @@ struct ContentView: View {
     ContentView(
         sidebarModel: SidebarModel(),
         accountStore: AccountStore(),
-        mailStore: MailStore())
+        mailStore: MailStore(),
+        labelStore: LabelStore())
 }

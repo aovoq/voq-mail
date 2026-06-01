@@ -21,7 +21,7 @@ struct SidebarList: View {
                         HStack {
                             Text(mailbox.title)
                             Spacer()
-                            if let count = mailbox.count {
+                            if let count = mailbox.unreadCount {
                                 Text(count, format: .number)
                                     .foregroundStyle(.secondary)
                             }

@@ -64,10 +64,27 @@ struct GmailClient {
         return decoded
     }
 
-    /// All labels for the account (used by the labels sidebar in issue #6).
+    /// All labels for the account, ids/names only (the list endpoint omits counts).
     func labels(accessToken: String) async throws -> [GmailLabel] {
         let data = try await get(URL(string: "\(Self.usersBase)/labels")!, accessToken: accessToken)
         return try JSONDecoder().decode(GmailLabelList.self, from: data).labels ?? []
+    }
+
+    /// One label with its unread/total counts populated (the list endpoint leaves
+    /// them empty, so the sidebar badges need this per-label get).
+    func label(id: String, accessToken: String) async throws -> GmailLabel {
+        let data = try await get(URL(string: "\(Self.usersBase)/labels/\(id)")!, accessToken: accessToken)
+        return try JSONDecoder().decode(GmailLabel.self, from: data)
+    }
+
+    /// Fetches each label's counts, capped at `concurrency` in-flight gets. Results
+    /// preserve the input order.
+    func labels(
+        ids: [String], concurrency: Int, accessToken: String
+    ) async throws -> [GmailLabel] {
+        try await concurrentMap(ids, concurrency: concurrency) { id in
+            try await label(id: id, accessToken: accessToken)
+        }
     }
 
     private struct AttachmentBody: Decodable {
@@ -85,33 +102,39 @@ struct GmailClient {
         return try await metadata(for: ids, concurrency: concurrency, accessToken: accessToken)
     }
 
-    /// Bounded-concurrency fan-out: keep at most `concurrency` gets in flight,
-    /// starting a new one each time one finishes (a sliding window).
     private func metadata(
         for ids: [String], concurrency: Int, accessToken: String
     ) async throws -> [GmailMessage] {
-        guard !ids.isEmpty else { return [] }
-        return try await withThrowingTaskGroup(of: (Int, GmailMessage).self) { group in
-            var results = [GmailMessage?](repeating: nil, count: ids.count)
+        try await concurrentMap(ids, concurrency: concurrency) { id in
+            try await messageMetadata(id: id, accessToken: accessToken)
+        }
+    }
+
+    /// Bounded-concurrency fan-out: maps `inputs` through `transform` keeping at
+    /// most `concurrency` calls in flight, starting a new one each time one
+    /// finishes (a sliding window). Results preserve the input order.
+    private func concurrentMap<Input: Sendable, Output: Sendable>(
+        _ inputs: [Input], concurrency: Int,
+        _ transform: @escaping @Sendable (Input) async throws -> Output
+    ) async throws -> [Output] {
+        guard !inputs.isEmpty else { return [] }
+        return try await withThrowingTaskGroup(of: (Int, Output).self) { group in
+            var results = [Output?](repeating: nil, count: inputs.count)
             var next = 0
-            let window = max(1, min(concurrency, ids.count))
+            let window = max(1, min(concurrency, inputs.count))
 
             for _ in 0..<window {
                 let index = next
                 next += 1
-                group.addTask { [self] in
-                    (index, try await messageMetadata(id: ids[index], accessToken: accessToken))
-                }
+                group.addTask { (index, try await transform(inputs[index])) }
             }
 
-            while let (index, message) = try await group.next() {
-                results[index] = message
-                if next < ids.count {
+            while let (index, value) = try await group.next() {
+                results[index] = value
+                if next < inputs.count {
                     let index = next
                     next += 1
-                    group.addTask { [self] in
-                        (index, try await messageMetadata(id: ids[index], accessToken: accessToken))
-                    }
+                    group.addTask { (index, try await transform(inputs[index])) }
                 }
             }
             return results.compactMap { $0 }

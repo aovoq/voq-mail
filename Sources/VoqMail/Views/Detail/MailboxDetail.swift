@@ -18,10 +18,6 @@ struct MailboxDetail: View {
     @State private var activeDraft: MailDraft?
     @State private var contentStore = MessageContentStore()
 
-    /// Only INBOX is backed by real data in this slice; other mailboxes get real
-    /// messages once labels land (issue #6).
-    private var isInbox: Bool { mailbox?.id == "inbox" }
-
     /// Slides the header content right of the traffic lights / toggle button when
     /// the sidebar is collapsed; tracks the toggle animation since it reads
     /// `isShown` inside the same transaction.
@@ -32,7 +28,7 @@ struct MailboxDetail: View {
     }
 
     private var messages: [MailMessage] {
-        isInbox ? mailStore.messages : []
+        mailStore.messages
     }
 
     private var selectedMessage: MailMessage? {
@@ -78,7 +74,7 @@ struct MailboxDetail: View {
 
                         MessageDetail(
                             message: displayMessage,
-                            isLoadingContent: isInbox && contentStore.isLoading,
+                            isLoadingContent: contentStore.isLoading,
                             downloadingAttachmentIDs: contentStore.downloadingAttachmentIDs,
                             onReply: { reply(to: $0) },
                             onPreviewAttachment: { attachment in
@@ -90,7 +86,7 @@ struct MailboxDetail: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .task(id: loadKey) { await loadInboxIfNeeded() }
+        .task(id: loadKey) { await loadMessagesIfNeeded() }
         // Cancellable per-selection: switching messages cancels the prior load so
         // a late response can't overwrite the newly selected message's content.
         .task(id: selectedMessage?.id) { await loadSelectedContent() }
@@ -116,12 +112,12 @@ struct MailboxDetail: View {
     private var messageListColumn: some View {
         MessageList(messages: messages, selection: $selectedMessageID)
             .overlay {
-                if isInbox && mailStore.isLoading && messages.isEmpty {
+                if mailStore.isLoading && messages.isEmpty {
                     ProgressView()
                 }
             }
             .overlay(alignment: .top) {
-                if isInbox, let error = mailStore.errorMessage, messages.isEmpty {
+                if let error = mailStore.errorMessage, messages.isEmpty {
                     Text(error)
                         .font(.caption)
                         .foregroundStyle(.red)
@@ -131,16 +127,15 @@ struct MailboxDetail: View {
             }
     }
 
-    private func loadInboxIfNeeded() async {
-        guard isInbox, let account = accountStore.accounts.first else { return }
-        await mailStore.loadInbox {
+    private func loadMessagesIfNeeded() async {
+        guard let mailbox, let account = accountStore.accounts.first else { return }
+        await mailStore.load(mailbox: mailbox) {
             try await accountStore.accessToken(for: account.email)
         }
     }
 
     private func loadSelectedContent() async {
-        guard isInbox,
-              let message = selectedMessage,
+        guard let message = selectedMessage,
               let account = accountStore.accounts.first else { return }
         await contentStore.load(message: message) {
             try await accountStore.accessToken(for: account.email)
