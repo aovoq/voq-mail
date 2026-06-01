@@ -5,6 +5,17 @@ MODE="${1:-run}"
 APP_NAME="VoqMail"
 BUNDLE_ID="work.aovoq.voqmail"
 MIN_SYSTEM_VERSION="14.0"
+SHORT_VERSION="0.1.0"
+BUILD_VERSION="1"
+# Stable code-signing identity (issue #2). A stable identity keeps the app's
+# designated requirement constant across rebuilds, so Keychain items created by
+# the app (OAuth refresh tokens) stay readable instead of being orphaned every
+# build — which is what ad-hoc signing (changing cdhash) does.
+#
+# Defaults to the personal-team Developer ID; override with CODE_SIGN_IDENTITY.
+# WARNING: switching identity changes the Team ID in the designated requirement,
+# which orphans existing Keychain items (one-time re-login). Pick one and keep it.
+CODE_SIGN_IDENTITY="${CODE_SIGN_IDENTITY:-Developer ID Application: ao hirata (XDZ7L87T5C)}"
 # Reversed client ID of the iOS OAuth client (issue #1). Registered below as a
 # custom URL scheme so ASWebAuthenticationSession can receive the redirect.
 # Mirror of OAuthConfiguration.redirectScheme — keep the two in sync.
@@ -43,6 +54,10 @@ cat >"$INFO_PLIST" <<PLIST
   <string>$APP_NAME</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
+  <key>CFBundleShortVersionString</key>
+  <string>$SHORT_VERSION</string>
+  <key>CFBundleVersion</key>
+  <string>$BUILD_VERSION</string>
   <key>LSMinimumSystemVersion</key>
   <string>$MIN_SYSTEM_VERSION</string>
   <key>NSPrincipalClass</key>
@@ -61,6 +76,12 @@ cat >"$INFO_PLIST" <<PLIST
 </dict>
 </plist>
 PLIST
+
+# Sign the finished bundle with the stable identity. Must run after the binary
+# and Info.plist are in place, since the signature seals the whole bundle.
+codesign --force --identifier "$BUNDLE_ID" --sign "$CODE_SIGN_IDENTITY" "$APP_BUNDLE"
+# Fail the build loudly if the signature is not valid/stable.
+codesign --verify --strict "$APP_BUNDLE"
 
 open_app() {
   /usr/bin/open -n "$APP_BUNDLE"
@@ -86,8 +107,16 @@ case "$MODE" in
     sleep 1
     pgrep -x "$APP_NAME" >/dev/null
     ;;
+  --sign-info|sign-info)
+    # Print the signing authority and designated requirement. The team ID in the
+    # requirement is what Keychain ACLs bind to; it must stay constant across
+    # rebuilds for saved tokens to remain readable.
+    codesign -dv --verbose=4 "$APP_BUNDLE" 2>&1 | grep -Ei "authority|identifier|teamident"
+    echo "--- designated requirement ---"
+    codesign -d --requirements - "$APP_BUNDLE" 2>&1 | tail -1
+    ;;
   *)
-    echo "usage: $0 [run|--debug|--logs|--telemetry|--verify]" >&2
+    echo "usage: $0 [run|--debug|--logs|--telemetry|--verify|--sign-info]" >&2
     exit 2
     ;;
 esac

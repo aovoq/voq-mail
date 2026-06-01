@@ -11,8 +11,32 @@ between the sidebar and the detail pane.
 ```
 
 The script builds with SwiftPM, assembles a `.app` bundle under `dist/`, writes
-an `Info.plist`, and launches the app. Other modes: `debug`, `logs`,
-`telemetry`, `verify` (see the script).
+an `Info.plist`, code-signs the bundle, and launches the app. Other modes:
+`debug`, `logs`, `telemetry`, `verify`, `sign-info` (see the script).
+
+## Code signing
+
+The app stores OAuth refresh tokens in the Keychain. A Keychain item's ACL is
+bound to the signing app's *designated requirement*, which includes the Team ID.
+Ad-hoc signing changes the code hash on every build, orphaning saved tokens and
+forcing a re-login each rebuild. So `build_and_run.sh` signs with a **stable
+identity** instead.
+
+- **Default identity:** `Developer ID Application: ao hirata (XDZ7L87T5C)` — a
+  *personal*-team certificate, chosen so it can't be revoked by an employer and
+  so it stays usable if we later notarize for distribution.
+- **Prerequisite:** that signing certificate must exist in your login Keychain.
+  Check with `security find-identity -v -p codesigning`. If you need one, create
+  it via Xcode (Settings → Accounts → Manage Certificates → +) or download it
+  from the Apple Developer portal, then import into Keychain Access.
+- **Override:** set `CODE_SIGN_IDENTITY="…"` to sign with a different identity.
+- **Do not switch identities mid-project.** A different identity means a
+  different Team ID in the designated requirement, which orphans existing
+  Keychain items (one-time re-login). Pick one and keep it.
+- **Verify stability:** `./script/build_and_run.sh sign-info` prints the signing
+  authority and designated requirement. The requirement (and its Team ID) must
+  stay identical across rebuilds for saved tokens to remain readable. The full
+  Keychain round-trip is exercised once token storage lands (issue #3).
 
 ## Where things live
 
