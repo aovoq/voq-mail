@@ -66,6 +66,30 @@ Sources/VoqMail/
 - **`Reference/`** holds example layouts that the running app does not use; they
   are there to learn from, not to wire up.
 
+## Gmail / OAuth setup
+
+Gmail access uses a Google Cloud OAuth client (project setup tracked in issue
+#1). The client is **External** type and runs in **Testing** mode.
+
+- **Client type: iOS** — a *public* client with no client secret. The PKCE flow
+  runs through `ASWebAuthenticationSession`.
+- **Where the settings live:** `Sources/VoqMail/Services/OAuthConfiguration.swift`
+  holds the `clientID`, the reversed-client-ID `redirectScheme`, the `redirectURI`,
+  and the requested `scopes` (`gmail.modify`, `gmail.send`, `openid`/`email`/`profile`).
+- **Secret handling:** because an iOS client has no secret, the `clientID` is not
+  sensitive and is committed to the repo. Nothing secret is stored here.
+- **Redirect scheme:** the reversed client ID is registered as a custom URL scheme
+  in the app's `Info.plist` (`CFBundleURLTypes`). `build_and_run.sh` writes it from
+  `OAUTH_REDIRECT_SCHEME`, which must stay in sync with
+  `OAuthConfiguration.redirectScheme`.
+
+**Testing-mode constraints (accepted for now):**
+
+- The consent screen shows an "unverified app" warning. Only registered test
+  users (every Gmail account we use, including personal `@gmail.com`) can sign in.
+- **Refresh tokens expire after 7 days.** Re-auth will be needed weekly until the
+  app is moved to Production. Token-expiry handling is a separate slice.
+
 ## Adding things
 
 - A new mailbox or message: edit `Models/SampleData.swift`.
