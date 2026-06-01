@@ -126,7 +126,7 @@ private enum TrafficLightLayout {
     static let topInset: CGFloat = 16
     static let buttons: [(NSWindow.ButtonType, CGFloat)] = [
         (.closeButton, 16),
-        (.miniaturizeButton, 38),
-        (.zoomButton, 60),
+        (.miniaturizeButton, 39),
+        (.zoomButton, 62),
     ]
 }

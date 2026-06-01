@@ -11,8 +11,18 @@ import SwiftUI
 
 struct MailboxDetail: View {
     let mailbox: Mailbox?
+    @Environment(SidebarModel.self) private var sidebarModel
     @State private var selectedMessageID: MailMessage.ID?
     @State private var activeDraft: MailDraft?
+
+    /// Slides the header content right of the traffic lights / toggle button when
+    /// the sidebar is collapsed; tracks the toggle animation since it reads
+    /// `isShown` inside the same transaction.
+    private var headerLeadingPadding: CGFloat {
+        sidebarModel.isShown
+            ? Metrics.mailboxHeaderHorizontalPadding
+            : Metrics.mailboxHeaderCollapsedLeadingPadding
+    }
 
     private var messages: [MailMessage] {
         MailMessage.samples(in: mailbox?.id)
@@ -31,17 +41,25 @@ struct MailboxDetail: View {
                     systemImage: "tray",
                     description: Text("Choose a mailbox from the sidebar.")
                 )
-            } else {
-                HStack(spacing: 0) {
-                    MessageList(messages: messages, selection: $selectedMessageID)
-                        .frame(width: 330)
+            } else if let mailbox {
+                VStack(spacing: 0) {
+                    MailboxHeaderView(
+                        mailbox: mailbox,
+                        messageCount: messages.count,
+                        leadingPadding: headerLeadingPadding
+                    )
 
-                    Divider()
+                    HStack(spacing: 0) {
+                        MessageList(messages: messages, selection: $selectedMessageID)
+                            .frame(width: 330)
 
-                    MessageDetail(message: selectedMessage) { message in
-                        reply(to: message)
+                        Divider()
+
+                        MessageDetail(message: selectedMessage) { message in
+                            reply(to: message)
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
         }

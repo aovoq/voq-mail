@@ -20,9 +20,9 @@ struct SidebarToggleButton: View {
 
     var body: some View {
         Image(systemName: "sidebar.left")
-            .font(.system(size: 15, weight: .medium))
+            .font(.system(size: 13, weight: .medium))
             .foregroundStyle(.secondary)
-            .frame(width: 28, height: 24)
+            .frame(width: 24, height: 22)
             .background {
                 RoundedRectangle(cornerRadius: 6)
                     .fill(isHovered ? Color.black.opacity(Palette.toggleHoverOpacity) : Color.clear)

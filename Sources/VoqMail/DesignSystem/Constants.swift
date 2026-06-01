@@ -37,11 +37,24 @@ enum Metrics {
     /// Smallest width the detail pane is allowed to shrink to.
     static let detailMinWidth: CGFloat = 420
 
+    /// Height of the detail pane's mailbox header content row. The 1pt bottom
+    /// border is drawn *outside* this height (added below), so the bar occupies
+    /// `mailboxHeaderHeight` + `mailboxHeaderBorderWidth` in total.
+    static let mailboxHeaderHeight: CGFloat = 46
+    /// Thickness of the header's bottom border, attached below the content.
+    static let mailboxHeaderBorderWidth: CGFloat = 1
+    /// Leading/trailing padding inside the mailbox header bar.
+    static let mailboxHeaderHorizontalPadding: CGFloat = 20
+    /// Leading padding for the header content while the sidebar is collapsed, so
+    /// the mailbox icon/title clear the traffic-light buttons and the toggle button
+    /// (which ends at `toggleButtonLeadingPadding` + its 24pt width).
+    static let mailboxHeaderCollapsedLeadingPadding: CGFloat = 120
+
     /// Padding that positions the floating sidebar toggle button. The leading
     /// value is chosen to clear the window's traffic-light buttons
     /// (see `TrafficLightLayout` in WindowChromeConfigurator.swift).
-    static let toggleButtonTopPadding: CGFloat = 11
-    static let toggleButtonLeadingPadding: CGFloat = 78
+    static let toggleButtonTopPadding: CGFloat = 12
+    static let toggleButtonLeadingPadding: CGFloat = 84
 
     // Sidebar list internals
     static let sidebarRowHeight: CGFloat = 28
