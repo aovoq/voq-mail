@@ -10,21 +10,22 @@ import SwiftUI
 
 struct ContentView: View {
     let sidebarModel: SidebarModel
-
-    init(sidebarModel: SidebarModel = SidebarModel()) {
-        self.sidebarModel = sidebarModel
-    }
+    let accountStore: AccountStore
 
     var body: some View {
         MainMailSplitView()
             .environment(sidebarModel)
+            .environment(accountStore)
             // WindowChromeConfigurator renders nothing; it is attached only for its
             // side effect of reaching and configuring the enclosing NSWindow.
             .background(WindowChromeConfigurator())
             .ignoresSafeArea(.container, edges: .top)
+            // Restore previously signed-in accounts (refresh token → access token
+            // → address) so the app shows signed-in state without a re-login.
+            .task { await accountStore.restoreAccounts() }
     }
 }
 
 #Preview {
-    ContentView()
+    ContentView(sidebarModel: SidebarModel(), accountStore: AccountStore())
 }
