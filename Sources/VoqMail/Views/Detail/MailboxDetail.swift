@@ -16,6 +16,7 @@ struct MailboxDetail: View {
     @Environment(AccountStore.self) private var accountStore
     @State private var selectedMessageID: MailMessage.ID?
     @State private var activeDraft: MailDraft?
+    @State private var contentStore = MessageContentStore()
 
     /// Only INBOX is backed by real data in this slice; other mailboxes get real
     /// messages once labels land (issue #6).
@@ -36,6 +37,16 @@ struct MailboxDetail: View {
 
     private var selectedMessage: MailMessage? {
         messages.first { $0.id == selectedMessageID } ?? messages.first
+    }
+
+    /// The selected message with fetched body/attachments merged in once loaded;
+    /// until then the list metadata (snippet body) stands in.
+    private var displayMessage: MailMessage? {
+        guard let base = selectedMessage else { return nil }
+        if contentStore.loadedMessageID == base.id, let content = contentStore.content {
+            return base.with(htmlBody: content.html, attachments: content.attachments)
+        }
+        return base
     }
 
     /// Re-fires the load when the selected mailbox or the signed-in account changes.
@@ -65,9 +76,14 @@ struct MailboxDetail: View {
 
                         Divider()
 
-                        MessageDetail(message: selectedMessage) { message in
-                            reply(to: message)
-                        }
+                        MessageDetail(
+                            message: displayMessage,
+                            isLoadingContent: isInbox && contentStore.isLoading,
+                            downloadingAttachmentIDs: contentStore.downloadingAttachmentIDs,
+                            onReply: { reply(to: $0) },
+                            onPreviewAttachment: { attachment in
+                                Task { await downloadAttachment(attachment) }
+                            })
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
                 }
@@ -75,6 +91,9 @@ struct MailboxDetail: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .task(id: loadKey) { await loadInboxIfNeeded() }
+        // Cancellable per-selection: switching messages cancels the prior load so
+        // a late response can't overwrite the newly selected message's content.
+        .task(id: selectedMessage?.id) { await loadSelectedContent() }
         .onChange(of: mailbox?.id) { _, _ in
             selectedMessageID = messages.first?.id
         }
@@ -115,6 +134,22 @@ struct MailboxDetail: View {
     private func loadInboxIfNeeded() async {
         guard isInbox, let account = accountStore.accounts.first else { return }
         await mailStore.loadInbox {
+            try await accountStore.accessToken(for: account.email)
+        }
+    }
+
+    private func loadSelectedContent() async {
+        guard isInbox,
+              let message = selectedMessage,
+              let account = accountStore.accounts.first else { return }
+        await contentStore.load(message: message) {
+            try await accountStore.accessToken(for: account.email)
+        }
+    }
+
+    private func downloadAttachment(_ attachment: MailAttachment) async {
+        guard let account = accountStore.accounts.first else { return }
+        await contentStore.downloadAttachment(attachment) {
             try await accountStore.accessToken(for: account.email)
         }
     }
