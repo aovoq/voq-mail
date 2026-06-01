@@ -67,6 +67,23 @@ extension MailMessage {
     static func samples(in mailboxID: Mailbox.ID?) -> [MailMessage] {
         samples.filter { $0.mailboxID == mailboxID }
     }
+
+    /// A copy with the body and attachments replaced by fetched content. Used to
+    /// merge a loaded full message onto its list-row metadata.
+    func with(htmlBody: String, attachments: [MailAttachment]) -> MailMessage {
+        MailMessage(
+            id: id,
+            sender: sender,
+            senderAddress: senderAddress,
+            recipients: recipients,
+            subject: subject,
+            preview: preview,
+            htmlBody: htmlBody,
+            receivedAt: receivedAt,
+            isRead: isRead,
+            attachments: attachments,
+            mailboxID: mailboxID)
+    }
 }
 
 private extension String {

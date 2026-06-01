@@ -9,6 +9,8 @@ import SwiftUI
 
 struct MessageAttachmentsView: View {
     let attachments: [MailAttachment]
+    var downloadingIDs: Set<String> = []
+    var onPreview: (MailAttachment) -> Void = { _ in }
     @State private var selectedAttachmentID: MailAttachment.ID?
 
     var body: some View {
@@ -26,7 +28,9 @@ struct MessageAttachmentsView: View {
                     }
 
                     if selectedAttachmentID == attachment.id {
-                        AttachmentPreviewSlot(attachment: attachment)
+                        AttachmentPreviewSlot(
+                            attachment: attachment,
+                            isDownloading: downloadingIDs.contains(attachment.id))
                     }
                 }
             }
@@ -34,7 +38,15 @@ struct MessageAttachmentsView: View {
     }
 
     private func toggleSelection(for attachment: MailAttachment) {
-        selectedAttachmentID = selectedAttachmentID == attachment.id ? nil : attachment.id
+        if selectedAttachmentID == attachment.id {
+            selectedAttachmentID = nil
+        } else {
+            selectedAttachmentID = attachment.id
+            // Fetch the bytes the first time the row is opened.
+            if attachment.localFileURL == nil {
+                onPreview(attachment)
+            }
+        }
     }
 }
 
@@ -75,15 +87,23 @@ private struct MessageAttachmentRow: View {
 
 private struct AttachmentPreviewSlot: View {
     let attachment: MailAttachment
+    var isDownloading: Bool = false
 
     var body: some View {
-        if attachment.localFileURL == nil {
+        if let _ = attachment.localFileURL {
+            AttachmentPreviewView(attachment: attachment)
+                .frame(height: 180)
+        } else if isDownloading {
+            HStack(spacing: 8) {
+                ProgressView()
+                Text("Downloading…")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        } else {
             Text("Preview will appear here once the attachment is downloaded.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-        } else {
-            AttachmentPreviewView(attachment: attachment)
-                .frame(height: 180)
         }
     }
 }

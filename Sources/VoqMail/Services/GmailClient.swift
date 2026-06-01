@@ -43,10 +43,36 @@ struct GmailClient {
         return try JSONDecoder().decode(GmailMessage.self, from: data)
     }
 
+    /// The full message (MIME tree with bodies) for rendering body + attachments.
+    func fullMessage(id: String, accessToken: String) async throws -> GmailMessage {
+        var components = URLComponents(string: "\(Self.usersBase)/messages/\(id)")!
+        components.queryItems = [.init(name: "format", value: "full")]
+        let data = try await get(components.url!, accessToken: accessToken)
+        return try JSONDecoder().decode(GmailMessage.self, from: data)
+    }
+
+    /// Raw bytes of one attachment, base64url-decoded.
+    func attachmentData(
+        messageID: String, attachmentId: String, accessToken: String
+    ) async throws -> Data {
+        let url = URL(string: "\(Self.usersBase)/messages/\(messageID)/attachments/\(attachmentId)")!
+        let data = try await get(url, accessToken: accessToken)
+        let body = try JSONDecoder().decode(AttachmentBody.self, from: data)
+        guard let decoded = Data(base64URLEncoded: body.data) else {
+            throw GmailError.requestFailed(status: -1, body: "attachment decode failed")
+        }
+        return decoded
+    }
+
     /// All labels for the account (used by the labels sidebar in issue #6).
     func labels(accessToken: String) async throws -> [GmailLabel] {
         let data = try await get(URL(string: "\(Self.usersBase)/labels")!, accessToken: accessToken)
         return try JSONDecoder().decode(GmailLabelList.self, from: data).labels ?? []
+    }
+
+    private struct AttachmentBody: Decodable {
+        let data: String
+        let size: Int?
     }
 
     /// Lists a label's newest messages and fetches each one's metadata, capped at

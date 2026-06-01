@@ -20,7 +20,9 @@ struct GmailMessageList: Decodable {
     }
 }
 
-/// `users.messages.get` response (format=metadata).
+/// `users.messages.get` response. The payload is fully recursive so the same
+/// type decodes both `format=metadata` (headers only) and `format=full` (the
+/// MIME tree with bodies); every full-only field is optional for compatibility.
 struct GmailMessage: Decodable {
     let id: String
     let threadId: String
@@ -31,12 +33,36 @@ struct GmailMessage: Decodable {
     let payload: Payload?
 
     struct Payload: Decodable {
+        let partId: String?
+        let mimeType: String?
+        let filename: String?
         let headers: [Header]?
+        let body: Body?
+        let parts: [Payload]?
+    }
+
+    struct Body: Decodable {
+        let attachmentId: String?
+        let size: Int?
+        /// base64url-encoded part bytes (present for inline/small parts).
+        let data: String?
     }
 
     struct Header: Decodable {
         let name: String
         let value: String
+    }
+}
+
+extension Data {
+    /// Decodes base64url (RFC 4648 §5), tolerating missing padding. Gmail returns
+    /// part and attachment bytes in this encoding.
+    init?(base64URLEncoded string: String) {
+        var s = string
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        while s.count % 4 != 0 { s.append("=") }
+        self.init(base64Encoded: s, options: [.ignoreUnknownCharacters])
     }
 }
 
