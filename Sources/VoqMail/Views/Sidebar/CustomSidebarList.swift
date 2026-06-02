@@ -38,6 +38,16 @@ struct CustomSidebarList: View {
                 .padding(.bottom, 8)
             }
             .scrollContentBackground(.hidden)
+            // Pinned band that occludes rows scrolling up under the window's
+            // traffic-light buttons. Same material as the sidebar background so
+            // the band is seamless; the matching `Color.clear` spacer atop the
+            // list keeps the first row clear of it at rest. Non-hit-testing so
+            // clicks still reach the traffic-light buttons.
+            .overlay(alignment: .top) {
+                VisualEffectBackground(style: .calibratedSidebar)
+                    .frame(height: Metrics.sidebarHeaderTopPadding)
+                    .allowsHitTesting(false)
+            }
 
             AccountStatusView()
         }
@@ -81,12 +91,27 @@ struct CustomSidebarList: View {
         }
 
         if let error = labelStore.error(for: account.id), mailboxes.isEmpty {
-            Text(error)
-                .font(.caption)
-                .foregroundStyle(.red)
-                .lineLimit(3)
-                .padding(.horizontal, 18)
-                .padding(.top, 6)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .lineLimit(3)
+
+                Button("Retry") { retry(account) }
+                    .font(.caption.weight(.medium))
+                    .buttonStyle(.link)
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 6)
+        }
+    }
+
+    /// Reloads one account's labels after a failure. `load` clears the error and
+    /// re-runs its own backoff, so this just kicks it off again.
+    private func retry(_ account: Account) {
+        let id = account.id
+        labelStore.load(accountID: id) {
+            try await accountStore.accessToken(for: id)
         }
     }
 
