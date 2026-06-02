@@ -23,6 +23,16 @@ struct MailMessage: Identifiable, Hashable {
     /// mutable so the store can update it optimistically.
     var labelIds: [String]
     let attachments: [MailAttachment]
+    /// The Gmail thread (conversation) this message belongs to. A reply reuses it
+    /// so the sent message stays in the same conversation.
+    let threadId: String
+    /// The RFC `Message-ID` header value (with angle brackets), used to thread a
+    /// reply via In-Reply-To/References. Absent for sample data.
+    let rfcMessageID: String?
+    /// The original `References` header value (a space-separated chain of
+    /// Message-IDs), carried so a reply can extend the chain per RFC 2822 §3.6.4
+    /// rather than dropping it. Absent for sample data / a thread root.
+    let rfcReferences: String?
     /// Links this message to its `Mailbox.id`.
     let mailboxID: String
     /// The account (email) this message belongs to. Decides which token fetches
@@ -44,6 +54,9 @@ struct MailMessage: Identifiable, Hashable {
         receivedAt: Date = Date(),
         labelIds: [String] = [],
         attachments: [MailAttachment] = [],
+        threadId: String = "",
+        rfcMessageID: String? = nil,
+        rfcReferences: String? = nil,
         mailboxID: String,
         accountID: String
     ) {
@@ -57,6 +70,9 @@ struct MailMessage: Identifiable, Hashable {
         self.receivedAt = receivedAt
         self.labelIds = labelIds
         self.attachments = attachments
+        self.threadId = threadId
+        self.rfcMessageID = rfcMessageID
+        self.rfcReferences = rfcReferences
         self.mailboxID = mailboxID
         self.accountID = accountID
     }
@@ -94,6 +110,9 @@ extension MailMessage {
             receivedAt: receivedAt,
             labelIds: labelIds,
             attachments: attachments,
+            threadId: threadId,
+            rfcMessageID: rfcMessageID,
+            rfcReferences: rfcReferences,
             mailboxID: mailboxID,
             accountID: accountID)
     }

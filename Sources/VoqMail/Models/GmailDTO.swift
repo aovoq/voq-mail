@@ -64,6 +64,8 @@ extension Data {
         while s.count % 4 != 0 { s.append("=") }
         self.init(base64Encoded: s, options: [.ignoreUnknownCharacters])
     }
+    // The inverse `base64URLEncodedString()` (used to build the raw send message)
+    // already lives on `Data` in PKCE.swift, so it is not redeclared here.
 }
 
 /// `users.labels.list` response.
@@ -112,6 +114,9 @@ extension MailMessage {
             receivedAt: Self.date(fromInternalDate: gmail.internalDate),
             labelIds: gmail.labelIds ?? [],
             attachments: [],
+            threadId: gmail.threadId,
+            rfcMessageID: headers["message-id"],
+            rfcReferences: headers["references"],
             mailboxID: mailboxID,
             accountID: accountID
         )
