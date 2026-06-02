@@ -15,6 +15,7 @@ struct ContentView: View {
     let mailStore: MailStore
     let labelStore: LabelStore
     let contentStore: MessageContentStore
+    let sendStore: SendStore
 
     var body: some View {
         MainMailSplitView()
@@ -24,6 +25,7 @@ struct ContentView: View {
             .environment(mailStore)
             .environment(labelStore)
             .environment(contentStore)
+            .environment(sendStore)
             // WindowChromeConfigurator renders nothing; it is attached only for its
             // side effect of reaching and configuring the enclosing NSWindow.
             .background(WindowChromeConfigurator())
@@ -33,10 +35,11 @@ struct ContentView: View {
             // (refresh token → access token → address) so the app shows signed-in
             // state without a re-login.
             .task {
-                accountStore.onAccountRemoved = { [labelStore, mailStore, contentStore] id in
+                accountStore.onAccountRemoved = { [labelStore, mailStore, contentStore, sendStore] id in
                     labelStore.purge(accountID: id)
                     mailStore.purge(accountID: id)
                     contentStore.purge(accountID: id)
+                    sendStore.purge(accountID: id)
                 }
                 await accountStore.restoreAccounts()
             }
@@ -50,5 +53,6 @@ struct ContentView: View {
         accountStore: AccountStore(),
         mailStore: MailStore(),
         labelStore: LabelStore(),
-        contentStore: MessageContentStore())
+        contentStore: MessageContentStore(),
+        sendStore: SendStore())
 }

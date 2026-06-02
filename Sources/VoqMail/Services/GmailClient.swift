@@ -43,6 +43,12 @@ struct GmailClient {
             .init(name: "metadataHeaders", value: "To"),
             .init(name: "metadataHeaders", value: "Subject"),
             .init(name: "metadataHeaders", value: "Date"),
+            // Carried on every list row so a reply can thread off the original's
+            // Message-ID (In-Reply-To/References) without a second fetch.
+            .init(name: "metadataHeaders", value: "Message-ID"),
+            // The parent's existing References chain, extended on a reply per
+            // RFC 2822 §3.6.4 so the chain isn't dropped on deep threads.
+            .init(name: "metadataHeaders", value: "References"),
         ]
         let data = try await get(components.url!, accessToken: accessToken)
         return try JSONDecoder().decode(GmailMessage.self, from: data)
@@ -71,6 +77,20 @@ struct GmailClient {
         let addLabelIds: [String]
         let removeLabelIds: [String]
     }
+
+    /// Sends a pre-built RFC 2822 message (`raw` is base64url). Passing `threadId`
+    /// drops the sent message into an existing conversation (a reply); omitting it
+    /// starts a new thread. The encoder leaves a nil `threadId` out of the JSON.
+    func sendMessage(raw: String, threadId: String?, accessToken: String) async throws -> SendResult {
+        let url = URL(string: "\(Self.usersBase)/messages/send")!
+        let body = try JSONEncoder().encode(SendRequest(raw: raw, threadId: threadId))
+        let data = try await post(url, body: body, accessToken: accessToken)
+        return try JSONDecoder().decode(SendResult.self, from: data)
+    }
+
+    struct SendResult: Decodable { let id: String; let threadId: String }
+
+    private struct SendRequest: Encodable { let raw: String; let threadId: String? }
 
     /// Raw bytes of one attachment, base64url-decoded.
     func attachmentData(

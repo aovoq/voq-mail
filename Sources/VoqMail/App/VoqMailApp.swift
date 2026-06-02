@@ -23,6 +23,9 @@ struct VoqMailApp: App {
     // Held at scene scope so AccountStore's onAccountRemoved purge hook (wired in
     // ContentView) can reach it when an account is removed (issue #8).
     @State private var contentStore = MessageContentStore()
+    // Per-account send-in-flight state, partitioned like the other stores (issue
+    // #8) so a send completion can't surface on another account's UI.
+    @State private var sendStore = SendStore()
 
     var body: some Scene {
         WindowGroup("") {
@@ -32,7 +35,8 @@ struct VoqMailApp: App {
                 accountStore: accountStore,
                 mailStore: mailStore,
                 labelStore: labelStore,
-                contentStore: contentStore)
+                contentStore: contentStore,
+                sendStore: sendStore)
                 .frame(minWidth: WindowMetrics.minSize.width, minHeight: WindowMetrics.minSize.height)
         }
         .defaultSize(width: WindowMetrics.defaultSize.width, height: WindowMetrics.defaultSize.height)

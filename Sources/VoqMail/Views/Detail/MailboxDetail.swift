@@ -15,6 +15,7 @@ struct MailboxDetail: View {
     @Environment(MailStore.self) private var mailStore
     @Environment(AccountStore.self) private var accountStore
     @Environment(MessageContentStore.self) private var contentStore
+    @Environment(SendStore.self) private var sendStore
     @State private var selectedMessageID: MailMessage.ID?
     @State private var activeDraft: MailDraft?
 
@@ -56,7 +57,8 @@ struct MailboxDetail: View {
                     MailboxHeaderView(
                         mailbox: mailbox,
                         messageCount: messages.count,
-                        leadingPadding: sidebarModel.collapsedClearingLeadingPadding
+                        leadingPadding: sidebarModel.collapsedClearingLeadingPadding,
+                        onCompose: { compose(from: mailbox.accountID) }
                     )
 
                     HStack(spacing: 0) {
@@ -96,12 +98,32 @@ struct MailboxDetail: View {
             }
         }
         .sheet(item: $activeDraft) { draft in
-            ComposerView(
-                draft: draftBinding(for: draft.id),
-                onCancel: { activeDraft = nil },
-                onSend: { activeDraft = nil }
-            )
+            composerSheet(for: draft)
         }
+    }
+
+    /// The composer sheet for the active draft. Extracted from `body` to keep that
+    /// expression light for the type-checker.
+    @ViewBuilder
+    private func composerSheet(for draft: MailDraft) -> some View {
+        // Read the account off the live `activeDraft`, not the presentation-time
+        // `draft` snapshot, so the From picker can re-key the send state.
+        let accountID = activeDraft?.accountID ?? draft.accountID
+        ComposerView(
+            draft: draftBinding(for: draft.id),
+            accounts: accountStore.accounts,
+            onCancel: {
+                sendStore.reset(accountID: accountID)
+                activeDraft = nil
+            },
+            // Capture the draft as it stands when Send is tapped; the binding's
+            // latest edits are already on `activeDraft`.
+            onSend: { Task { await send(activeDraft ?? draft) } },
+            // Send state is keyed by the draft's account in SendStore, so a late
+            // completion after an account switch can't surface here (issue #8).
+            isSending: sendStore.isSending(accountID: accountID),
+            errorMessage: sendStore.errorMessage(accountID: accountID)
+        )
     }
 
     /// The message list with INBOX loading/error feedback layered on top.
@@ -173,12 +195,32 @@ struct MailboxDetail: View {
     }
 
     private func reply(to message: MailMessage) {
+        sendStore.reset(accountID: message.accountID)
         activeDraft = MailDraft.reply(to: message)
+    }
+
+    private func compose(from accountID: String) {
+        sendStore.reset(accountID: accountID)
+        activeDraft = MailDraft.compose(from: accountID)
+    }
+
+    /// Builds and sends the draft via the per-account SendStore, then closes the
+    /// sheet on success. On failure the sheet stays open with the error shown so
+    /// the user can fix and retry. The store drops a stale completion (issue #8),
+    /// so closing the sheet is gated on success belonging to the live draft.
+    private func send(_ draft: MailDraft) async {
+        let accountID = draft.accountID
+        let succeeded = await sendStore.send(draft) {
+            try await accountStore.accessToken(for: accountID)
+        }
+        if succeeded, activeDraft?.id == draft.id {
+            activeDraft = nil
+        }
     }
 
     private func draftBinding(for id: MailDraft.ID) -> Binding<MailDraft> {
         Binding {
-            activeDraft ?? MailDraft(id: id, to: [], subject: "", body: "", replyingToMessageID: nil)
+            activeDraft ?? MailDraft.compose(from: mailbox?.accountID ?? "")
         } set: { draft in
             activeDraft = draft
         }
