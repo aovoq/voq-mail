@@ -14,7 +14,10 @@ struct GmailProfileService {
 
     var session: URLSession = .shared
 
-    /// The account's email address, via `users.getProfile`.
+    /// The account's email address, via `users.getProfile`. Normalized
+    /// (trimmed + lowercased) so it is identical every time it is fetched: the
+    /// address is both the account id and its Keychain key, so a stable value is
+    /// what lets account removal delete by id and hit the right Keychain item.
     func emailAddress(accessToken: String) async throws -> String {
         var request = URLRequest(url: Self.profileEndpoint)
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
@@ -25,7 +28,8 @@ struct GmailProfileService {
             throw OAuthError.profileFetchFailed(
                 status: (response as? HTTPURLResponse)?.statusCode ?? -1)
         }
-        return try JSONDecoder().decode(Profile.self, from: data).emailAddress
+        let address = try JSONDecoder().decode(Profile.self, from: data).emailAddress
+        return address.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 
     private struct Profile: Decodable {

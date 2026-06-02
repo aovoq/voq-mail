@@ -11,13 +11,16 @@
 import Foundation
 
 extension Mailbox {
+    /// Email tagging the single-account demo data.
+    static let sampleAccountID = "sample@example.com"
+
     /// Demo mailboxes shown in the sidebar.
     static let samples: [Mailbox] = [
-        Mailbox(id: "inbox", title: "Inbox", systemImage: "tray.fill", gmailLabelID: "INBOX", isSystem: true, parentID: nil, unreadCount: 12),
-        Mailbox(id: "sent", title: "Sent", systemImage: "paperplane.fill", gmailLabelID: "SENT", isSystem: true, parentID: nil, unreadCount: nil),
-        Mailbox(id: "drafts", title: "Drafts", systemImage: "doc.fill", gmailLabelID: "DRAFT", isSystem: true, parentID: nil, unreadCount: 3),
-        Mailbox(id: "archive", title: "Archive", systemImage: "archivebox.fill", gmailLabelID: "ARCHIVE", isSystem: true, parentID: nil, unreadCount: nil),
-        Mailbox(id: "trash", title: "Trash", systemImage: "trash.fill", gmailLabelID: "TRASH", isSystem: true, parentID: nil, unreadCount: nil)
+        Mailbox(id: "inbox", accountID: sampleAccountID, title: "Inbox", systemImage: "tray.fill", gmailLabelID: "INBOX", isSystem: true, parentID: nil, unreadCount: 12),
+        Mailbox(id: "sent", accountID: sampleAccountID, title: "Sent", systemImage: "paperplane.fill", gmailLabelID: "SENT", isSystem: true, parentID: nil, unreadCount: nil),
+        Mailbox(id: "drafts", accountID: sampleAccountID, title: "Drafts", systemImage: "doc.fill", gmailLabelID: "DRAFT", isSystem: true, parentID: nil, unreadCount: 3),
+        Mailbox(id: "archive", accountID: sampleAccountID, title: "Archive", systemImage: "archivebox.fill", gmailLabelID: "ARCHIVE", isSystem: true, parentID: nil, unreadCount: nil),
+        Mailbox(id: "trash", accountID: sampleAccountID, title: "Trash", systemImage: "trash.fill", gmailLabelID: "TRASH", isSystem: true, parentID: nil, unreadCount: nil)
     ]
 }
 
@@ -37,7 +40,8 @@ extension MailMessage {
             ),
             receivedAt: Date(timeIntervalSinceNow: -900),
             labelIds: ["UNREAD"],
-            mailboxID: "inbox"
+            mailboxID: "inbox",
+            accountID: Mailbox.sampleAccountID
         ),
         MailMessage(
             id: "2",
@@ -54,7 +58,8 @@ extension MailMessage {
             attachments: [
                 MailAttachment(id: "attachment-1", filename: "sync-plan.txt", byteCount: 1_840, contentType: "text/plain", localFileURL: nil)
             ],
-            mailboxID: "inbox"
+            mailboxID: "inbox",
+            accountID: Mailbox.sampleAccountID
         ),
         MailMessage(
             id: "3",
@@ -65,7 +70,8 @@ extension MailMessage {
             preview: "Keeping the first screen quiet and useful.",
             receivedAt: Date(timeIntervalSinceNow: -7_200),
             labelIds: ["UNREAD"],
-            mailboxID: "drafts"
+            mailboxID: "drafts",
+            accountID: Mailbox.sampleAccountID
         ),
         MailMessage(
             id: "4",
@@ -75,7 +81,8 @@ extension MailMessage {
             subject: "Sent sample",
             preview: "A sent message preview for the middle column.",
             receivedAt: Date(timeIntervalSinceNow: -20_000),
-            mailboxID: "sent"
+            mailboxID: "sent",
+            accountID: Mailbox.sampleAccountID
         ),
         MailMessage(
             id: "5",
@@ -85,7 +92,8 @@ extension MailMessage {
             subject: "Archived thread",
             preview: "Older conversation moved out of the inbox.",
             receivedAt: Date(timeIntervalSinceNow: -80_000),
-            mailboxID: "archive"
+            mailboxID: "archive",
+            accountID: Mailbox.sampleAccountID
         )
     ]
 

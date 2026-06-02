@@ -2,74 +2,34 @@
 //  CustomSidebarList.swift
 //  VoqMail
 //
-//  The scrollable list of mailboxes in the sidebar, sourced from the account's
-//  Gmail labels (issue #6). System mailboxes show in a fixed order; user labels
-//  show as a `/`-nested disclosure hierarchy. Built from a ScrollView + plain
-//  buttons (rather than a native List) so the rows and the custom split-view
-//  background can be styled freely.
+//  The scrollable list of mailboxes in the sidebar, grouped by account (issue #8):
+//  one section per signed-in account, each headed by its address and listing that
+//  account's Gmail labels (issue #6) — system mailboxes in a fixed order, then
+//  user labels as a `/`-nested disclosure hierarchy. Selecting a label makes its
+//  account active. Built from a ScrollView + plain buttons (rather than a native
+//  List) so the rows and the custom split-view background can be styled freely.
 //
 
 import SwiftUI
 
 struct CustomSidebarList: View {
     @Binding var selection: Mailbox.ID?
+    @Environment(AccountStore.self) private var accountStore
     @Environment(LabelStore.self) private var labelStore
     /// Collapsed user-label ids. Absence means expanded, so labels start open.
+    /// Shared across accounts; `Mailbox.id` is composite so ids never collide.
     @State private var collapsed: Set<Mailbox.ID> = []
-
-    private var systemMailboxes: [Mailbox] {
-        labelStore.mailboxes.filter(\.isSystem)
-    }
-
-    private var rootUserMailboxes: [Mailbox] {
-        labelStore.mailboxes.filter { !$0.isSystem && $0.parentID == nil }
-    }
-
-    private func children(of id: Mailbox.ID) -> [Mailbox] {
-        labelStore.mailboxes.filter { $0.parentID == id }
-    }
 
     var body: some View {
         // Mailbox list scrolls; the account footer stays pinned to the bottom.
         VStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
-                    sectionHeader("Mailboxes")
-                        // Extra top padding clears the window's traffic-light buttons.
-                        .padding(.top, Metrics.sidebarHeaderTopPadding)
+                    // Clears the window's traffic-light buttons above the first row.
+                    Color.clear.frame(height: Metrics.sidebarHeaderTopPadding)
 
-                    ForEach(systemMailboxes) { mailbox in
-                        row(for: mailbox)
-                    }
-
-                    if !rootUserMailboxes.isEmpty {
-                        sectionHeader("Labels")
-                            .padding(.top, 12)
-
-                        ForEach(rootUserMailboxes) { mailbox in
-                            SidebarLabelNode(
-                                mailbox: mailbox,
-                                depth: 0,
-                                selection: $selection,
-                                collapsed: $collapsed,
-                                children: children)
-                        }
-                    }
-
-                    if labelStore.isLoading && labelStore.mailboxes.isEmpty {
-                        ProgressView()
-                            .controlSize(.small)
-                            .padding(.horizontal, 18)
-                            .padding(.top, 6)
-                    }
-
-                    if let error = labelStore.errorMessage, labelStore.mailboxes.isEmpty {
-                        Text(error)
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                            .lineLimit(3)
-                            .padding(.horizontal, 18)
-                            .padding(.top, 6)
+                    ForEach(accountStore.accounts) { account in
+                        accountSection(account)
                     }
 
                     Spacer(minLength: 0)
@@ -82,6 +42,65 @@ struct CustomSidebarList: View {
             AccountStatusView()
         }
         .ignoresSafeArea(.container, edges: .top)
+    }
+
+    /// One account's group: an address header, its system mailboxes, then its
+    /// user-label hierarchy. Reads the slice for this account so each group is
+    /// independent.
+    @ViewBuilder
+    private func accountSection(_ account: Account) -> some View {
+        let mailboxes = labelStore.mailboxes(for: account.id)
+        let systemMailboxes = mailboxes.filter(\.isSystem)
+        let rootUserMailboxes = mailboxes.filter { !$0.isSystem && $0.parentID == nil }
+
+        accountHeader(account.email)
+
+        ForEach(systemMailboxes) { mailbox in
+            row(for: mailbox)
+        }
+
+        if !rootUserMailboxes.isEmpty {
+            sectionHeader("Labels")
+                .padding(.top, 8)
+
+            ForEach(rootUserMailboxes) { mailbox in
+                SidebarLabelNode(
+                    mailbox: mailbox,
+                    depth: 0,
+                    selection: $selection,
+                    collapsed: $collapsed,
+                    children: { id in mailboxes.filter { $0.parentID == id } })
+            }
+        }
+
+        if labelStore.isLoading(for: account.id) && mailboxes.isEmpty {
+            ProgressView()
+                .controlSize(.small)
+                .padding(.horizontal, 18)
+                .padding(.top, 6)
+        }
+
+        if let error = labelStore.error(for: account.id), mailboxes.isEmpty {
+            Text(error)
+                .font(.caption)
+                .foregroundStyle(.red)
+                .lineLimit(3)
+                .padding(.horizontal, 18)
+                .padding(.top, 6)
+        }
+    }
+
+    /// The per-account group header showing the account's address.
+    private func accountHeader(_ email: String) -> some View {
+        Text(email)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.primary)
+            .lineLimit(1)
+            .truncationMode(.middle)
+            .padding(.horizontal, 14)
+            .padding(.top, 14)
+            .padding(.bottom, 4)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func sectionHeader(_ title: String) -> some View {

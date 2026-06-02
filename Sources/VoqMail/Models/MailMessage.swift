@@ -25,6 +25,10 @@ struct MailMessage: Identifiable, Hashable {
     let attachments: [MailAttachment]
     /// Links this message to its `Mailbox.id`.
     let mailboxID: String
+    /// The account (email) this message belongs to. Decides which token fetches
+    /// its body/attachments and keys it apart from a same-id message in another
+    /// account (so `Hashable` no longer collides across accounts).
+    let accountID: String
 
     /// True unless the message still carries Gmail's `UNREAD` label.
     var isRead: Bool { !labelIds.contains("UNREAD") }
@@ -40,7 +44,8 @@ struct MailMessage: Identifiable, Hashable {
         receivedAt: Date = Date(),
         labelIds: [String] = [],
         attachments: [MailAttachment] = [],
-        mailboxID: String
+        mailboxID: String,
+        accountID: String
     ) {
         self.id = id
         self.sender = sender
@@ -53,6 +58,7 @@ struct MailMessage: Identifiable, Hashable {
         self.labelIds = labelIds
         self.attachments = attachments
         self.mailboxID = mailboxID
+        self.accountID = accountID
     }
 
     private static func plainTextHTML(from text: String) -> String {
@@ -88,7 +94,8 @@ extension MailMessage {
             receivedAt: receivedAt,
             labelIds: labelIds,
             attachments: attachments,
-            mailboxID: mailboxID)
+            mailboxID: mailboxID,
+            accountID: accountID)
     }
 }
 

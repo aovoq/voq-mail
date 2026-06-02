@@ -11,16 +11,22 @@ import Foundation
 /// A mail folder shown in the sidebar. Backed by a Gmail label (issue #6); the
 /// demo data in SampleData.swift fills the same fields for previews/reference.
 struct Mailbox: Identifiable, Hashable {
-    /// Stable identifier used to track the sidebar selection. Equal to the Gmail
-    /// label id for real mailboxes.
+    /// Stable identifier used to track the sidebar selection. For real mailboxes
+    /// it is the composite `"\(accountID)|\(gmailLabelID)"` so the same Gmail
+    /// label id (e.g. "INBOX") in two accounts does not collide in the selection,
+    /// the collapsed set, or any flat collection. (SampleData uses simpler ids.)
     let id: String
+    /// The account (email) this mailbox belongs to. Threads multi-account state
+    /// through the stores and decides which token fetches its messages.
+    let accountID: String
     /// Display name, e.g. "Inbox". For nested user labels this is the trailing
     /// path segment ("Sub" for "Work/Sub"), not the full path.
     let title: String
     /// SF Symbol name for the row's icon.
     let systemImage: String
     /// The Gmail label id this mailbox maps to (e.g. "INBOX", "Label_42"). Used to
-    /// list the label's messages and fetch its unread count.
+    /// list the label's messages and fetch its unread count. Stays the bare label
+    /// id (the API and the default-Inbox match rely on it), distinct from `id`.
     let gmailLabelID: String
     /// True for Gmail's built-in labels (INBOX/SENT/…), false for user labels.
     let isSystem: Bool

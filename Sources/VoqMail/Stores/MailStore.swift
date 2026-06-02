@@ -3,8 +3,12 @@
 //  VoqMail
 //
 //  Observable message-list state for the running app: the fetched messages for
-//  the selected mailbox plus the loading/error flags the UI reflects. Single
-//  account for now (issue #8 broadens this).
+//  the selected mailbox plus the loading/error flags the UI reflects. State is
+//  partitioned by account id (issue #8): each account keeps its own messages,
+//  paging cursor, and load generation, so switching accounts never lets one
+//  account's late response surface on (or stomp) another's list. The UI-facing
+//  properties reflect the *active* account — the one whose mailbox was last
+//  loaded — so the views read `messages`/`isLoading`/… exactly as before.
 //
 
 import Foundation
@@ -13,73 +17,130 @@ import Observation
 @Observable
 @MainActor
 final class MailStore {
-    private(set) var messages: [MailMessage] = []
-    /// True during the initial load of a mailbox (an empty list).
-    private(set) var isLoading = false
-    /// True while appending the next page to an already-loaded list.
-    private(set) var isLoadingMore = false
-    var errorMessage: String?
+    /// Per-account message-list state. Kept as one value so a mutation always
+    /// writes the whole keyed entry back (`statesByAccount[id] = s`), which is
+    /// what makes @Observable fire — mutating a field two levels deep would not.
+    private struct AccountMessages {
+        var messages: [MailMessage] = []
+        /// The mailbox the current `messages` belong to, or `nil` before any load.
+        var loaded: Mailbox?
+        /// Token for the next page, or `nil` when exhausted / unloaded.
+        var nextPageToken: String?
+        /// Bumped on every `load`; lets a superseded load or stale page append drop
+        /// its late results (the user switched mailboxes mid-fetch).
+        var loadGeneration = 0
+        var isLoading = false
+        var isLoadingMore = false
+        var errorMessage: String?
+    }
+
+    private var statesByAccount: [String: AccountMessages] = [:]
+    /// The account whose state the computed properties below reflect. Set on every
+    /// `load` to the loaded mailbox's account.
+    private(set) var activeAccountID: String?
 
     /// How many messages to fetch per page.
     private static let pageSize = 30
 
     private let client = GmailClient()
-    /// The mailbox the current `messages` belong to, or `nil` before any load.
-    private var loaded: Mailbox?
-    /// Token for the next page, or `nil` when the list is exhausted / unloaded.
-    private var nextPageToken: String?
-    /// Bumped on every `load`; lets a superseded load or a stale page append (the
-    /// user switched mailboxes mid-fetch) drop its late results.
-    private var loadGeneration = 0
 
+    // MARK: - Active-account view
+
+    private var active: AccountMessages {
+        activeAccountID.flatMap { statesByAccount[$0] } ?? AccountMessages()
+    }
+
+    var messages: [MailMessage] { active.messages }
+    /// True during the initial load of a mailbox (an empty list).
+    var isLoading: Bool { active.isLoading }
+    /// True while appending the next page to an already-loaded list.
+    var isLoadingMore: Bool { active.isLoadingMore }
+    var errorMessage: String? { active.errorMessage }
     /// The id of the mailbox the current `messages` belong to.
-    var loadedMailboxID: Mailbox.ID? { loaded?.id }
+    var loadedMailboxID: Mailbox.ID? { active.loaded?.id }
     /// Whether another page can be appended via `loadMore`.
-    var canLoadMore: Bool { nextPageToken != nil }
+    var canLoadMore: Bool { active.nextPageToken != nil }
 
-    /// Loads the given mailbox's first page. `token` supplies a valid access token
-    /// (it may refresh), so token failures are captured here alongside fetch
-    /// failures. Switching mailboxes clears the stale list before the new load.
+    private func state(for accountID: String) -> AccountMessages {
+        statesByAccount[accountID] ?? AccountMessages()
+    }
+
+    /// Drops an account's message state (used when the account is removed).
+    func purge(accountID: String) {
+        statesByAccount[accountID] = nil
+        if activeAccountID == accountID { activeAccountID = nil }
+    }
+
+    // MARK: - Loading
+
+    /// Loads the given mailbox's first page for its account. `token` supplies a
+    /// valid access token (it may refresh), so token failures are captured here
+    /// alongside fetch failures. Switching mailboxes clears the stale list before
+    /// the new load; switching accounts surfaces the new account's cached list
+    /// immediately (no flash) because `activeAccountID` is set synchronously.
     func load(mailbox: Mailbox, token: @escaping @Sendable () async throws -> String) async {
-        loadGeneration &+= 1
-        let generation = loadGeneration
-        isLoading = true
-        errorMessage = nil
-        if loaded?.id != mailbox.id {
-            messages = []
-            nextPageToken = nil
+        let accountID = mailbox.accountID
+        activeAccountID = accountID
+
+        var s = state(for: accountID)
+        s.loadGeneration &+= 1
+        let generation = s.loadGeneration
+        s.isLoading = true
+        s.errorMessage = nil
+        if s.loaded?.id != mailbox.id {
+            s.messages = []
+            s.nextPageToken = nil
         }
-        loaded = mailbox
-        defer { if generation == loadGeneration { isLoading = false } }
+        s.loaded = mailbox
+        statesByAccount[accountID] = s
+        defer {
+            if var s = statesByAccount[accountID], s.loadGeneration == generation {
+                s.isLoading = false
+                statesByAccount[accountID] = s
+            }
+        }
 
         do {
             let accessToken = try await token()
             let page = try await client.messages(
                 labelID: mailbox.gmailLabelID, maxResults: Self.pageSize,
                 pageToken: nil, concurrency: 5, accessToken: accessToken)
-            guard generation == loadGeneration else { return }
-            messages = page.messages
-                .map { MailMessage(gmail: $0, mailboxID: mailbox.id) }
+            guard statesByAccount[accountID]?.loadGeneration == generation else { return }
+            var s = state(for: accountID)
+            s.messages = page.messages
+                .map { MailMessage(gmail: $0, accountID: accountID, mailboxID: mailbox.id) }
                 .sorted { $0.receivedAt > $1.receivedAt }
-            nextPageToken = page.nextPageToken
+            s.nextPageToken = page.nextPageToken
+            statesByAccount[accountID] = s
         } catch {
             // A cancellation is the expected outcome of switching mailboxes mid-load;
             // only a still-current, non-cancelled failure is worth surfacing.
-            guard generation == loadGeneration, !isCancellation(error) else { return }
-            errorMessage = String(describing: error)
+            guard statesByAccount[accountID]?.loadGeneration == generation,
+                  !isCancellation(error) else { return }
+            var s = state(for: accountID)
+            s.errorMessage = String(describing: error)
+            statesByAccount[accountID] = s
         }
     }
 
-    /// Appends the next page to the current mailbox's list. No-op when a load is in
-    /// flight or there is no further page; stops paging once the token runs out.
-    func loadMore(token: @escaping @Sendable () async throws -> String) async {
-        guard !isLoading, !isLoadingMore,
-              let mailbox = loaded,
-              let pageToken = nextPageToken else { return }
-        let generation = loadGeneration
-        isLoadingMore = true
-        errorMessage = nil
-        defer { isLoadingMore = false }
+    /// Appends the next page to the account's current mailbox list. No-op when a
+    /// load is in flight or there is no further page; stops paging once the token
+    /// runs out.
+    func loadMore(accountID: String, token: @escaping @Sendable () async throws -> String) async {
+        var s = state(for: accountID)
+        guard !s.isLoading, !s.isLoadingMore,
+              let mailbox = s.loaded,
+              let pageToken = s.nextPageToken else { return }
+        let generation = s.loadGeneration
+        s.isLoadingMore = true
+        s.errorMessage = nil
+        statesByAccount[accountID] = s
+        defer {
+            if var s = statesByAccount[accountID] {
+                s.isLoadingMore = false
+                statesByAccount[accountID] = s
+            }
+        }
 
         do {
             let accessToken = try await token()
@@ -87,36 +148,46 @@ final class MailStore {
                 labelID: mailbox.gmailLabelID, maxResults: Self.pageSize,
                 pageToken: pageToken, concurrency: 5, accessToken: accessToken)
             // A mailbox switch since this page was requested invalidates the append.
-            guard generation == loadGeneration else { return }
-            let existing = Set(messages.map(\.id))
+            guard statesByAccount[accountID]?.loadGeneration == generation else { return }
+            var s = state(for: accountID)
+            let existing = Set(s.messages.map(\.id))
             let added = page.messages
-                .map { MailMessage(gmail: $0, mailboxID: mailbox.id) }
+                .map { MailMessage(gmail: $0, accountID: accountID, mailboxID: mailbox.id) }
                 .filter { !existing.contains($0.id) }
-            messages = (messages + added).sorted { $0.receivedAt > $1.receivedAt }
-            nextPageToken = page.nextPageToken
+            s.messages = (s.messages + added).sorted { $0.receivedAt > $1.receivedAt }
+            s.nextPageToken = page.nextPageToken
+            statesByAccount[accountID] = s
         } catch {
-            guard generation == loadGeneration, !isCancellation(error) else { return }
-            errorMessage = String(describing: error)
+            guard statesByAccount[accountID]?.loadGeneration == generation,
+                  !isCancellation(error) else { return }
+            var s = state(for: accountID)
+            s.errorMessage = String(describing: error)
+            statesByAccount[accountID] = s
         }
     }
 
-    /// Flips the read state of a message, or no-ops if it is already in `read`.
-    func toggleRead(messageID: MailMessage.ID, token: @escaping @Sendable () async throws -> String) async {
-        guard let message = messages.first(where: { $0.id == messageID }) else { return }
-        await setRead(!message.isRead, messageID: messageID, token: token)
+    // MARK: - Read state
+
+    /// Flips the read state of a message in the given account, or no-ops if it is
+    /// already in `read`.
+    func toggleRead(messageID: MailMessage.ID, accountID: String, token: @escaping @Sendable () async throws -> String) async {
+        guard let message = state(for: accountID).messages.first(where: { $0.id == messageID }) else { return }
+        await setRead(!message.isRead, messageID: messageID, accountID: accountID, token: token)
     }
 
     /// Sets a message read or unread by adding/removing Gmail's `UNREAD` label. The
     /// UI updates optimistically (bold flips immediately); a failed modify rolls the
     /// label set back. A no-op when the message is already in the requested state.
-    func setRead(_ read: Bool, messageID: MailMessage.ID, token: @escaping @Sendable () async throws -> String) async {
-        guard let index = messages.firstIndex(where: { $0.id == messageID }),
-              messages[index].isRead != read else { return }
+    func setRead(_ read: Bool, messageID: MailMessage.ID, accountID: String, token: @escaping @Sendable () async throws -> String) async {
+        var s = state(for: accountID)
+        guard let index = s.messages.firstIndex(where: { $0.id == messageID }),
+              s.messages[index].isRead != read else { return }
 
-        let previous = messages[index].labelIds
-        messages[index].labelIds = read
+        let previous = s.messages[index].labelIds
+        s.messages[index].labelIds = read
             ? previous.filter { $0 != "UNREAD" }
             : previous + ["UNREAD"]
+        statesByAccount[accountID] = s
 
         do {
             let accessToken = try await token()
@@ -129,10 +200,12 @@ final class MailStore {
             // A cancellation (the message was deselected before the modify returned)
             // leaves the optimistic state in place rather than reverting it.
             guard !isCancellation(error) else { return }
-            if let index = messages.firstIndex(where: { $0.id == messageID }) {
-                messages[index].labelIds = previous
+            var s = state(for: accountID)
+            if let index = s.messages.firstIndex(where: { $0.id == messageID }) {
+                s.messages[index].labelIds = previous
             }
-            errorMessage = String(describing: error)
+            s.errorMessage = String(describing: error)
+            statesByAccount[accountID] = s
         }
     }
 }

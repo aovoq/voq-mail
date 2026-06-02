@@ -57,11 +57,13 @@ struct MainMailSplitView: View {
                 .zIndex(5)
         }
         .ignoresSafeArea(.container, edges: .top)
-        // Load the account's labels once it is signed in / restored.
-        .task(id: accountStore.accounts.first?.id) { await loadLabelsIfNeeded() }
+        // Load every signed-in / restored account's labels so the sidebar can group
+        // them all. Re-fires when the set of accounts changes (add / remove).
+        .task(id: accountStore.accounts.map(\.id)) { await loadAllLabels() }
         // Default to the Inbox (or the first label) once labels populate, and keep
-        // the selection valid if the label set changes underneath it.
-        .onChange(of: labelStore.mailboxes) { _, mailboxes in
+        // the selection valid if the label set changes underneath it (e.g. an
+        // account is removed).
+        .onChange(of: allMailboxes) { _, mailboxes in
             if selection == nil || !mailboxes.contains(where: { $0.id == selection }) {
                 selection = mailboxes.first(where: { $0.gmailLabelID == "INBOX" })?.id
                     ?? mailboxes.first?.id
@@ -71,14 +73,25 @@ struct MainMailSplitView: View {
 
     // MARK: - Selection
 
-    private var selectedMailbox: Mailbox? {
-        labelStore.mailboxes.first { $0.id == selection }
+    /// Every signed-in account's mailboxes, flattened in account order. The sidebar
+    /// renders them grouped per account; selection resolves against this flat list,
+    /// and the selected mailbox's `accountID` is what makes that account active.
+    private var allMailboxes: [Mailbox] {
+        accountStore.accounts.flatMap { labelStore.mailboxes(for: $0.id) }
     }
 
-    private func loadLabelsIfNeeded() async {
-        guard let account = accountStore.accounts.first else { return }
-        await labelStore.loadLabels {
-            try await accountStore.accessToken(for: account.email)
+    private var selectedMailbox: Mailbox? {
+        allMailboxes.first { $0.id == selection }
+    }
+
+    /// Loads labels for each account that has none yet, so re-firing on an account
+    /// add/remove doesn't refetch the accounts already shown.
+    private func loadAllLabels() async {
+        for account in accountStore.accounts where labelStore.mailboxes(for: account.id).isEmpty {
+            let id = account.id
+            await labelStore.loadLabels(accountID: id) {
+                try await accountStore.accessToken(for: id)
+            }
         }
     }
 

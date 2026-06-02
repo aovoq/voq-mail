@@ -14,9 +14,9 @@ struct MailboxDetail: View {
     @Environment(SidebarModel.self) private var sidebarModel
     @Environment(MailStore.self) private var mailStore
     @Environment(AccountStore.self) private var accountStore
+    @Environment(MessageContentStore.self) private var contentStore
     @State private var selectedMessageID: MailMessage.ID?
     @State private var activeDraft: MailDraft?
-    @State private var contentStore = MessageContentStore()
 
     /// Slides the header content right of the traffic lights / toggle button when
     /// the sidebar is collapsed; tracks the toggle animation since it reads
@@ -39,15 +39,17 @@ struct MailboxDetail: View {
     /// until then the list metadata (snippet body) stands in.
     private var displayMessage: MailMessage? {
         guard let base = selectedMessage else { return nil }
-        if contentStore.loadedMessageID == base.id, let content = contentStore.content {
+        if contentStore.isShowing(accountID: base.accountID, messageID: base.id),
+           let content = contentStore.content {
             return base.with(htmlBody: content.html, attachments: content.attachments)
         }
         return base
     }
 
-    /// Re-fires the load when the selected mailbox or the signed-in account changes.
-    private var loadKey: String {
-        "\(mailbox?.id ?? "")|\(accountStore.accounts.first?.id ?? "")"
+    /// Re-fires the load when the selected mailbox changes. `Mailbox.id` is already
+    /// composite (`accountID|labelID`), so it also changes when the account does.
+    private var loadKey: Mailbox.ID? {
+        mailbox?.id
     }
 
     var body: some View {
@@ -136,44 +138,46 @@ struct MailboxDetail: View {
     }
 
     private func loadMessagesIfNeeded() async {
-        guard let mailbox, let account = accountStore.accounts.first else { return }
+        guard let mailbox else { return }
+        let accountID = mailbox.accountID
         await mailStore.load(mailbox: mailbox) {
-            try await accountStore.accessToken(for: account.email)
+            try await accountStore.accessToken(for: accountID)
         }
     }
 
     private func loadMore() async {
-        guard let account = accountStore.accounts.first else { return }
-        await mailStore.loadMore {
-            try await accountStore.accessToken(for: account.email)
+        guard let mailbox else { return }
+        let accountID = mailbox.accountID
+        await mailStore.loadMore(accountID: accountID) {
+            try await accountStore.accessToken(for: accountID)
         }
     }
 
     private func loadSelectedContent() async {
-        guard let message = selectedMessage,
-              let account = accountStore.accounts.first else { return }
+        guard let message = selectedMessage else { return }
+        let accountID = message.accountID
         // Opening a message marks it read; the user can flip it back from the header.
         if !message.isRead {
-            await mailStore.setRead(true, messageID: message.id) {
-                try await accountStore.accessToken(for: account.email)
+            await mailStore.setRead(true, messageID: message.id, accountID: accountID) {
+                try await accountStore.accessToken(for: accountID)
             }
         }
-        await contentStore.load(message: message) {
-            try await accountStore.accessToken(for: account.email)
+        await contentStore.load(message: message, accountID: accountID) {
+            try await accountStore.accessToken(for: accountID)
         }
     }
 
     private func toggleRead(_ message: MailMessage) async {
-        guard let account = accountStore.accounts.first else { return }
-        await mailStore.toggleRead(messageID: message.id) {
-            try await accountStore.accessToken(for: account.email)
+        let accountID = message.accountID
+        await mailStore.toggleRead(messageID: message.id, accountID: accountID) {
+            try await accountStore.accessToken(for: accountID)
         }
     }
 
     private func downloadAttachment(_ attachment: MailAttachment) async {
-        guard let account = accountStore.accounts.first else { return }
-        await contentStore.downloadAttachment(attachment) {
-            try await accountStore.accessToken(for: account.email)
+        guard let accountID = selectedMessage?.accountID else { return }
+        await contentStore.downloadAttachment(attachment, accountID: accountID) {
+            try await accountStore.accessToken(for: accountID)
         }
     }
 
