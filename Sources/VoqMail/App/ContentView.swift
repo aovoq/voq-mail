@@ -10,6 +10,7 @@ import SwiftUI
 
 struct ContentView: View {
     let sidebarModel: SidebarModel
+    let navigation: AppNavigation
     let accountStore: AccountStore
     let mailStore: MailStore
     let labelStore: LabelStore
@@ -18,6 +19,7 @@ struct ContentView: View {
     var body: some View {
         MainMailSplitView()
             .environment(sidebarModel)
+            .environment(navigation)
             .environment(accountStore)
             .environment(mailStore)
             .environment(labelStore)
@@ -35,6 +37,7 @@ struct ContentView: View {
 #Preview {
     ContentView(
         sidebarModel: SidebarModel(),
+        navigation: AppNavigation(),
         accountStore: AccountStore(),
         mailStore: MailStore(),
         labelStore: LabelStore(),

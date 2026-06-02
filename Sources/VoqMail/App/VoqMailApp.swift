@@ -16,6 +16,7 @@ struct VoqMailApp: App {
     // Bridges an AppKit application delegate into the SwiftUI app lifecycle.
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var sidebarModel = SidebarModel()
+    @State private var navigation = AppNavigation()
     @State private var accountStore = AccountStore()
     @State private var mailStore = MailStore()
     @State private var labelStore = LabelStore()
@@ -27,6 +28,7 @@ struct VoqMailApp: App {
         WindowGroup("") {
             ContentView(
                 sidebarModel: sidebarModel,
+                navigation: navigation,
                 accountStore: accountStore,
                 mailStore: mailStore,
                 labelStore: labelStore,
@@ -36,6 +38,13 @@ struct VoqMailApp: App {
         .defaultSize(width: WindowMetrics.defaultSize.width, height: WindowMetrics.defaultSize.height)
         .windowStyle(.hiddenTitleBar)
         .commands {
+            // Replace the disabled stock "Settings…" item (there is no SwiftUI
+            // Settings scene) with one that toggles the in-window settings panel,
+            // keeping the conventional ⌘, shortcut.
+            CommandGroup(replacing: .appSettings) {
+                Button("Settings…", action: navigation.toggleSettings)
+                    .keyboardShortcut(",", modifiers: .command)
+            }
             CommandGroup(after: .toolbar) {
                 Button("Toggle Sidebar", action: sidebarModel.toggleAnimated)
                     .keyboardShortcut("b", modifiers: .command)

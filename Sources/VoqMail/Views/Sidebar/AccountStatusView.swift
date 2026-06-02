@@ -2,81 +2,62 @@
 //  AccountStatusView.swift
 //  VoqMail
 //
-//  Sidebar footer: lists the signed-in accounts (each removable via a context
-//  menu) and an "Add Account" button that launches the OAuth flow. Removing an
-//  account deletes its Keychain token and purges its per-account store state
-//  (issue #8).
+//  Sidebar footer: an entry into the settings panel, plus an at-a-glance count of
+//  signed-in accounts. Adding, removing, and (later) re-authenticating accounts
+//  now all live in Settings → Accounts; this footer only opens that panel, so the
+//  sidebar stays focused on mailboxes.
 //
 
 import SwiftUI
 
 struct AccountStatusView: View {
     @Environment(AccountStore.self) private var store
-    @Environment(MailStore.self) private var mailStore
-    @Environment(LabelStore.self) private var labelStore
-    @Environment(MessageContentStore.self) private var contentStore
+    @Environment(AppNavigation.self) private var navigation
+
+    private var accountSummary: String {
+        switch store.accounts.count {
+        case 0: return "No accounts"
+        case 1: return "1 account"
+        case let n: return "\(n) accounts"
+        }
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(spacing: 0) {
             Divider()
                 .padding(.horizontal, 10)
 
-            if store.accounts.isEmpty {
-                Text("No account")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 12)
-            } else {
-                ForEach(store.accounts) { account in
-                    Label(account.email, systemImage: "person.crop.circle")
-                        .font(.callout)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .padding(.horizontal, 12)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(Rectangle())
-                        .contextMenu {
-                            Button("Remove Account", role: .destructive) {
-                                remove(account)
-                            }
-                        }
-                }
-            }
-
             Button {
-                Task { await store.addAccount() }
+                navigation.showSettings(.accounts)
             } label: {
-                Label(
-                    store.isAuthenticating ? "Signing in…" : "Add Account",
-                    systemImage: "plus.circle")
-                    .font(.callout)
+                HStack(spacing: 10) {
+                    Image(systemName: "gearshape")
+                        .frame(width: Metrics.sidebarRowIconWidth)
+                        .foregroundStyle(navigation.isShowingSettings ? .primary : .secondary)
+
+                    Text("Settings")
+                        .font(.body)
+
+                    Spacer(minLength: 6)
+
+                    Text(accountSummary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                .padding(.horizontal, 10)
+                .frame(maxWidth: .infinity, minHeight: Metrics.sidebarRowHeight, alignment: .leading)
+                .background {
+                    RoundedRectangle(cornerRadius: Metrics.sidebarRowCornerRadius)
+                        .fill(navigation.isShowingSettings
+                              ? Color(nsColor: .selectedContentBackgroundColor).opacity(Palette.sidebarRowSelectionOpacity)
+                              : .clear)
+                }
+                .padding(.horizontal, 8)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .disabled(store.isAuthenticating)
-            .padding(.horizontal, 12)
-
-            if let error = store.lastError {
-                Text(error)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-                    .lineLimit(2)
-                    .padding(.horizontal, 12)
-            }
-        }
-        .padding(.vertical, 10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    /// Removes the account (Keychain token + cached access token + signed-in list)
-    /// and purges its slice from every per-account store. The store lives at app
-    /// level so its content can be purged here. Selection self-heals via
-    /// MailSplitView's `onChange(of: allMailboxes)`.
-    private func remove(_ account: Account) {
-        Task {
-            await store.removeAccount(account.id)
-            labelStore.purge(accountID: account.id)
-            mailStore.purge(accountID: account.id)
-            contentStore.purge(accountID: account.id)
+            .padding(.vertical, 8)
         }
     }
 }

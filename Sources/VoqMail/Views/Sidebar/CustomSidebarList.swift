@@ -16,6 +16,7 @@ struct CustomSidebarList: View {
     @Binding var selection: Mailbox.ID?
     @Environment(AccountStore.self) private var accountStore
     @Environment(LabelStore.self) private var labelStore
+    @Environment(AppNavigation.self) private var navigation
     /// Collapsed user-label ids. Absence means expanded, so labels start open.
     /// Shared across accounts; `Mailbox.id` is composite so ids never collide.
     @State private var collapsed: Set<Mailbox.ID> = []
@@ -172,6 +173,10 @@ struct CustomSidebarList: View {
     private func row(for mailbox: Mailbox) -> some View {
         Button {
             selection = mailbox.id
+            // An explicit mailbox click leaves settings, if open. Only the click
+            // does this — not the programmatic selection that label loads trigger —
+            // so adding an account from settings doesn't bounce the user out.
+            navigation.showMailbox()
         } label: {
             CustomSidebarRow(mailbox: mailbox, isSelected: selection == mailbox.id)
         }
@@ -187,6 +192,7 @@ private struct SidebarLabelNode: View {
     @Binding var selection: Mailbox.ID?
     @Binding var collapsed: Set<Mailbox.ID>
     let children: (Mailbox.ID) -> [Mailbox]
+    @Environment(AppNavigation.self) private var navigation
 
     var body: some View {
         let kids = children(mailbox.id)
@@ -194,6 +200,7 @@ private struct SidebarLabelNode: View {
 
         Button {
             selection = mailbox.id
+            navigation.showMailbox()
         } label: {
             CustomSidebarRow(
                 mailbox: mailbox,

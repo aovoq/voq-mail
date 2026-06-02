@@ -14,6 +14,7 @@ struct MainMailSplitView: View {
     // MARK: - State
 
     @Environment(SidebarModel.self) private var sidebarModel
+    @Environment(AppNavigation.self) private var navigation
     @Environment(AccountStore.self) private var accountStore
     @Environment(LabelStore.self) private var labelStore
 
@@ -136,8 +137,15 @@ struct MainMailSplitView: View {
                 .frame(width: sidebarModel.seamX)
                 .allowsHitTesting(false)
 
-            MailboxDetail(mailbox: selectedMailbox)
-                .frame(minWidth: Metrics.detailMinWidth, maxWidth: .infinity, maxHeight: .infinity)
+            Group {
+                switch navigation.detailRoute {
+                case .mailbox:
+                    MailboxDetail(mailbox: selectedMailbox)
+                case .settings:
+                    SettingsView()
+                }
+            }
+            .frame(minWidth: Metrics.detailMinWidth, maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 

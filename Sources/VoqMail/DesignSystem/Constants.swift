@@ -68,6 +68,30 @@ enum Metrics {
     static let sidebarDisclosureWidth: CGFloat = 12
 }
 
+// MARK: - Settings
+
+/// Sizes for the in-window settings panel that replaces the detail pane.
+///
+/// Named `SettingsMetrics`, not `Settings`, so it can't shadow SwiftUI's own
+/// `Settings` scene type — the same precaution `Motion` takes against `Animation`.
+enum SettingsMetrics {
+    /// Width of the settings tab rail (the section list on the left of the panel).
+    /// Sits just wide of the sidebar so the two read as siblings, not twins.
+    static let tabRailWidth: CGFloat = 204
+    /// Height of a tab-rail row. A touch taller than a sidebar row since these are
+    /// the panel's primary navigation, not a dense list.
+    static let tabRowHeight: CGFloat = 30
+    /// Widest the content column grows to before it stops tracking the pane width,
+    /// keeping form rows a comfortable reading measure in a wide window.
+    static let contentMaxWidth: CGFloat = 600
+    /// Padding around the content column.
+    static let contentPadding: CGFloat = 28
+    /// Vertical gap between titled sections in the content column.
+    static let sectionSpacing: CGFloat = 26
+    /// Corner radius of a grouped card (e.g. the accounts list container).
+    static let cardCornerRadius: CGFloat = 10
+}
+
 // MARK: - Motion
 
 /// Animations for showing and hiding the sidebar. Expand is a touch slower than
