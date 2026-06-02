@@ -19,6 +19,8 @@ struct CustomSidebarList: View {
     /// Collapsed user-label ids. Absence means expanded, so labels start open.
     /// Shared across accounts; `Mailbox.id` is composite so ids never collide.
     @State private var collapsed: Set<Mailbox.ID> = []
+    /// Collapsed account ids. Absence means expanded, so accounts start open.
+    @State private var collapsedAccounts: Set<Account.ID> = []
 
     var body: some View {
         // Mailbox list scrolls; the account footer stays pinned to the bottom.
@@ -62,47 +64,63 @@ struct CustomSidebarList: View {
         let mailboxes = labelStore.mailboxes(for: account.id)
         let systemMailboxes = mailboxes.filter(\.isSystem)
         let rootUserMailboxes = mailboxes.filter { !$0.isSystem && $0.parentID == nil }
+        let isExpanded = !collapsedAccounts.contains(account.id)
 
-        accountHeader(account.email)
-
-        ForEach(systemMailboxes) { mailbox in
-            row(for: mailbox)
+        accountHeader(account.email, isExpanded: isExpanded) {
+            toggleAccount(account.id)
         }
 
-        if !rootUserMailboxes.isEmpty {
-            sectionHeader("Labels")
-                .padding(.top, 8)
-
-            ForEach(rootUserMailboxes) { mailbox in
-                SidebarLabelNode(
-                    mailbox: mailbox,
-                    depth: 0,
-                    selection: $selection,
-                    collapsed: $collapsed,
-                    children: { id in mailboxes.filter { $0.parentID == id } })
+        if isExpanded {
+            ForEach(systemMailboxes) { mailbox in
+                row(for: mailbox)
             }
-        }
 
-        if labelStore.isLoading(for: account.id) && mailboxes.isEmpty {
-            ProgressView()
-                .controlSize(.small)
+            if !rootUserMailboxes.isEmpty {
+                sectionHeader("Labels")
+                    .padding(.top, 8)
+
+                ForEach(rootUserMailboxes) { mailbox in
+                    SidebarLabelNode(
+                        mailbox: mailbox,
+                        depth: 0,
+                        selection: $selection,
+                        collapsed: $collapsed,
+                        children: { id in mailboxes.filter { $0.parentID == id } })
+                }
+            }
+
+            if labelStore.isLoading(for: account.id) && mailboxes.isEmpty {
+                ProgressView()
+                    .controlSize(.small)
+                    .padding(.horizontal, 18)
+                    .padding(.top, 6)
+            }
+
+            if let error = labelStore.error(for: account.id), mailboxes.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .lineLimit(3)
+
+                    Button("Retry") { retry(account) }
+                        .font(.caption.weight(.medium))
+                        .buttonStyle(.link)
+                }
                 .padding(.horizontal, 18)
                 .padding(.top, 6)
-        }
-
-        if let error = labelStore.error(for: account.id), mailboxes.isEmpty {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(error)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-                    .lineLimit(3)
-
-                Button("Retry") { retry(account) }
-                    .font(.caption.weight(.medium))
-                    .buttonStyle(.link)
             }
-            .padding(.horizontal, 18)
-            .padding(.top, 6)
+        }
+    }
+
+    private func toggleAccount(_ id: Account.ID) {
+        let isCollapsing = !collapsedAccounts.contains(id)
+        withAnimation(isCollapsing ? Motion.sidebarCollapse : Motion.sidebarExpand) {
+            if isCollapsing {
+                collapsedAccounts.insert(id)
+            } else {
+                collapsedAccounts.remove(id)
+            }
         }
     }
 
@@ -115,17 +133,31 @@ struct CustomSidebarList: View {
         }
     }
 
-    /// The per-account group header showing the account's address.
-    private func accountHeader(_ email: String) -> some View {
-        Text(email)
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(.primary)
-            .lineLimit(1)
-            .truncationMode(.middle)
+    /// The per-account group header showing the account's address. Tapping it
+    /// collapses or expands that account's mailboxes; the chevron mirrors the state.
+    private func accountHeader(_ email: String, isExpanded: Bool, onToggle: @escaping () -> Void) -> some View {
+        Button(action: onToggle) {
+            HStack(spacing: 6) {
+                Image(systemName: "chevron.right")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
+
+                Text(email)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+
+                Spacer(minLength: 0)
+            }
             .padding(.horizontal, 14)
             .padding(.top, 14)
             .padding(.bottom, 4)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private func sectionHeader(_ title: String) -> some View {
