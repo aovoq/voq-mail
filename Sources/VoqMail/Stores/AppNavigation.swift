@@ -28,9 +28,9 @@ final class AppNavigation {
 
     var isShowingSettings: Bool { detailRoute == .settings }
 
-    /// Opens settings, optionally jumping straight to a tab.
-    func showSettings(_ tab: SettingsTab? = nil) {
-        if let tab { settingsTab = tab }
+    /// Opens settings on the given tab.
+    func showSettings(_ tab: SettingsTab) {
+        settingsTab = tab
         detailRoute = .settings
     }
 

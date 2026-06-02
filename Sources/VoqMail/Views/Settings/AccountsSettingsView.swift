@@ -13,13 +13,10 @@ import SwiftUI
 
 struct AccountsSettingsView: View {
     @Environment(AccountStore.self) private var store
-    @Environment(MailStore.self) private var mailStore
-    @Environment(LabelStore.self) private var labelStore
-    @Environment(MessageContentStore.self) private var contentStore
 
     var body: some View {
         VStack(alignment: .leading, spacing: SettingsMetrics.sectionSpacing) {
-            section(
+            SettingsSection(
                 title: "Accounts",
                 caption: "Gmail accounts signed in to voq-mail."
             ) {
@@ -119,39 +116,12 @@ struct AccountsSettingsView: View {
         .disabled(store.isAuthenticating)
     }
 
-    // MARK: - Section scaffold
-
-    /// A titled section: a header, an optional caption, then its rows.
-    private func section<Content: View>(
-        title: String,
-        caption: String? = nil,
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.title3.weight(.semibold))
-                if let caption {
-                    Text(caption)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            content()
-        }
-    }
-
     // MARK: - Actions
 
-    /// Removes the account (Keychain token + cached access token + signed-in list)
-    /// and purges its slice from every per-account store. Mirrors the old sidebar
-    /// footer's removal so behavior is unchanged by the move into settings.
+    /// Removes the account. The per-account store slices are purged by
+    /// `AccountStore`'s `onAccountRemoved` hook (wired in ContentView), so this
+    /// view no longer reaches into the other stores itself.
     private func remove(_ account: Account) {
-        Task {
-            await store.removeAccount(account.id)
-            labelStore.purge(accountID: account.id)
-            mailStore.purge(accountID: account.id)
-            contentStore.purge(accountID: account.id)
-        }
+        Task { await store.removeAccount(account.id) }
     }
 }

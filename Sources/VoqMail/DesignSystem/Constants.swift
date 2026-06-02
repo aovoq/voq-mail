@@ -66,6 +66,14 @@ enum Metrics {
     /// Width reserved at a row's leading edge for the disclosure chevron (or its
     /// spacer), so every row's icon lines up whether or not it has children.
     static let sidebarDisclosureWidth: CGFloat = 12
+
+    /// Outer horizontal inset that frames a selectable row's selection highlight.
+    /// Shared by the mailbox rows, the sidebar Settings footer, and the settings
+    /// tab rows (see `sidebarRowSelection`) so the three stay in sync.
+    static let sidebarRowSelectionInset: CGFloat = 8
+    /// A selectable row's HStack spacing and its inner horizontal padding — the
+    /// same value, kept in one place so those three rows line their content up.
+    static let sidebarRowContentSpacing: CGFloat = 10
 }
 
 // MARK: - Settings

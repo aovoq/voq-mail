@@ -18,15 +18,10 @@ struct AppearanceSettingsView: View {
         @Bindable var sidebar = sidebarModel
 
         VStack(alignment: .leading, spacing: SettingsMetrics.sectionSpacing) {
-            VStack(alignment: .leading, spacing: 12) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Sidebar")
-                        .font(.title3.weight(.semibold))
-                    Text("Width of the mailbox sidebar. Resets when the app relaunches.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-
+            SettingsSection(
+                title: "Sidebar",
+                caption: "Width of the mailbox sidebar. Resets when the app relaunches."
+            ) {
                 HStack(spacing: 12) {
                     Slider(
                         value: $sidebar.width,

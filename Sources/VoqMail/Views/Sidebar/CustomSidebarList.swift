@@ -139,10 +139,7 @@ struct CustomSidebarList: View {
     private func accountHeader(_ email: String, isExpanded: Bool, onToggle: @escaping () -> Void) -> some View {
         Button(action: onToggle) {
             HStack(spacing: 6) {
-                Image(systemName: "chevron.right")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                DisclosureChevron(isExpanded: isExpanded)
 
                 Text(email)
                     .font(.subheadline.weight(.semibold))

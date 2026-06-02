@@ -20,8 +20,8 @@ struct VoqMailApp: App {
     @State private var accountStore = AccountStore()
     @State private var mailStore = MailStore()
     @State private var labelStore = LabelStore()
-    // Held here (rather than locally in MailboxDetail) so account removal can purge
-    // its per-account content via the environment (issue #8).
+    // Held at scene scope so AccountStore's onAccountRemoved purge hook (wired in
+    // ContentView) can reach it when an account is removed (issue #8).
     @State private var contentStore = MessageContentStore()
 
     var body: some Scene {

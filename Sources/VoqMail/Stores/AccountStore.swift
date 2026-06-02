@@ -26,6 +26,11 @@ final class AccountStore {
     private let profiles = GmailProfileService()
     private let webAuth = WebAuthenticationSession()
 
+    /// Per-account purge hook, run after an account is removed. Wired once at
+    /// composition (ContentView) so this store can drive the per-account store
+    /// slices' cleanup without depending on those stores itself (issue #8).
+    var onAccountRemoved: ((String) -> Void)?
+
     /// Launches the OAuth consent flow and adds the resulting account.
     func addAccount() async {
         guard !isAuthenticating else { return }
@@ -66,11 +71,11 @@ final class AccountStore {
     }
 
     /// Removes an account: deletes its Keychain refresh token, drops its cached
-    /// access token, and removes it from the signed-in list. Callers are
-    /// responsible for purging the per-account store slices (the stores are not
-    /// reachable from here); see AccountStatusView. Deleting by `id` — the same
-    /// normalized address `storedAccountEmails()` returns — guarantees the
-    /// Keychain item is hit, so the account does not reappear on relaunch.
+    /// access token, removes it from the signed-in list, then runs the registered
+    /// `onAccountRemoved` hook to purge the per-account store slices. Deleting by
+    /// `id` — the same normalized address `storedAccountEmails()` returns —
+    /// guarantees the Keychain item is hit, so the account does not reappear on
+    /// relaunch.
     func removeAccount(_ id: String) async {
         do {
             try keychain.deleteRefreshToken(for: id)
@@ -79,6 +84,7 @@ final class AccountStore {
         }
         await tokenProvider.clearCache(for: id)
         accounts.removeAll { $0.id == id }
+        onAccountRemoved?(id)
     }
 
     /// A valid access token for an account, for use by Gmail API calls (#4+).

@@ -30,7 +30,7 @@ struct AccountStatusView: View {
             Button {
                 navigation.showSettings(.accounts)
             } label: {
-                HStack(spacing: 10) {
+                HStack(spacing: Metrics.sidebarRowContentSpacing) {
                     Image(systemName: "gearshape")
                         .frame(width: Metrics.sidebarRowIconWidth)
                         .foregroundStyle(navigation.isShowingSettings ? .primary : .secondary)
@@ -45,16 +45,9 @@ struct AccountStatusView: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
-                .padding(.horizontal, 10)
+                .padding(.horizontal, Metrics.sidebarRowContentSpacing)
                 .frame(maxWidth: .infinity, minHeight: Metrics.sidebarRowHeight, alignment: .leading)
-                .background {
-                    RoundedRectangle(cornerRadius: Metrics.sidebarRowCornerRadius)
-                        .fill(navigation.isShowingSettings
-                              ? Color(nsColor: .selectedContentBackgroundColor).opacity(Palette.sidebarRowSelectionOpacity)
-                              : .clear)
-                }
-                .padding(.horizontal, 8)
-                .contentShape(Rectangle())
+                .sidebarRowSelection(isSelected: navigation.isShowingSettings)
             }
             .buttonStyle(.plain)
             .padding(.vertical, 8)

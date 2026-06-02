@@ -20,6 +20,17 @@ final class SidebarModel {
         isShown ? width : 0
     }
 
+    /// Leading padding for a detail-pane header's content (mailbox or settings):
+    /// the normal inset while the sidebar is shown, and a wider one while it is
+    /// collapsed so the icon/title slide clear of the traffic lights and the
+    /// floating toggle button. Read inside `body` so it animates in the same
+    /// observation transaction as `isShown`; never snapshot it.
+    var collapsedClearingLeadingPadding: CGFloat {
+        isShown
+            ? Metrics.mailboxHeaderHorizontalPadding
+            : Metrics.mailboxHeaderCollapsedLeadingPadding
+    }
+
     func toggle() {
         isShown.toggle()
     }

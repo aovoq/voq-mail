@@ -17,6 +17,20 @@ enum SidebarDisclosure {
     case expanded
 }
 
+/// The leading disclosure glyph used by sidebar rows and account headers: a
+/// chevron that rotates to point down when expanded. Just the glyph — callers
+/// own any fixed width, hit target, or tap gesture around it.
+struct DisclosureChevron: View {
+    let isExpanded: Bool
+
+    var body: some View {
+        Image(systemName: "chevron.right")
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .rotationEffect(.degrees(isExpanded ? 90 : 0))
+    }
+}
+
 struct CustomSidebarRow: View {
     let mailbox: Mailbox
     let isSelected: Bool
@@ -25,7 +39,7 @@ struct CustomSidebarRow: View {
     var onToggle: (() -> Void)? = nil
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: Metrics.sidebarRowContentSpacing) {
             disclosureControl
 
             Image(systemName: mailbox.systemImage)
@@ -46,16 +60,9 @@ struct CustomSidebarRow: View {
         }
         .foregroundStyle(.primary)
         .padding(.leading, CGFloat(depth) * Metrics.sidebarIndentWidth)
-        .padding(.horizontal, 10)
+        .padding(.horizontal, Metrics.sidebarRowContentSpacing)
         .frame(maxWidth: .infinity, minHeight: Metrics.sidebarRowHeight, maxHeight: Metrics.sidebarRowHeight, alignment: .leading)
-        .background {
-            RoundedRectangle(cornerRadius: Metrics.sidebarRowCornerRadius)
-                .fill(isSelected
-                      ? Color(nsColor: .selectedContentBackgroundColor).opacity(Palette.sidebarRowSelectionOpacity)
-                      : .clear)
-        }
-        .padding(.horizontal, 8)
-        .contentShape(Rectangle())
+        .sidebarRowSelection(isSelected: isSelected)
     }
 
     /// The leading chevron for rows with children, or an equal-width spacer so all
@@ -66,10 +73,7 @@ struct CustomSidebarRow: View {
         case .none:
             Color.clear.frame(width: Metrics.sidebarDisclosureWidth)
         case .collapsed, .expanded:
-            Image(systemName: "chevron.right")
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .rotationEffect(.degrees(disclosure == .expanded ? 90 : 0))
+            DisclosureChevron(isExpanded: disclosure == .expanded)
                 .frame(width: Metrics.sidebarDisclosureWidth)
                 .contentShape(Rectangle())
                 .onTapGesture { onToggle?() }

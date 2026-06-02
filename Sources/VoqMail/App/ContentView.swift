@@ -28,9 +28,18 @@ struct ContentView: View {
             // side effect of reaching and configuring the enclosing NSWindow.
             .background(WindowChromeConfigurator())
             .ignoresSafeArea(.container, edges: .top)
-            // Restore previously signed-in accounts (refresh token → access token
-            // → address) so the app shows signed-in state without a re-login.
-            .task { await accountStore.restoreAccounts() }
+            // Wire the per-account purge once (the stores aren't reachable from
+            // AccountStore itself), then restore previously signed-in accounts
+            // (refresh token → access token → address) so the app shows signed-in
+            // state without a re-login.
+            .task {
+                accountStore.onAccountRemoved = { [labelStore, mailStore, contentStore] id in
+                    labelStore.purge(accountID: id)
+                    mailStore.purge(accountID: id)
+                    contentStore.purge(accountID: id)
+                }
+                await accountStore.restoreAccounts()
+            }
     }
 }
 

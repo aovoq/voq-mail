@@ -17,32 +17,14 @@ struct MailboxHeaderView: View {
     var leadingPadding: CGFloat = Metrics.mailboxHeaderHorizontalPadding
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 10) {
-                Image(systemName: mailbox.systemImage)
-                    .font(.headline)
-                    .foregroundStyle(.secondary)
-
-                Text(mailbox.title)
-                    .font(.headline.weight(.semibold))
-                    .lineLimit(1)
-
-                Spacer()
-
-                Text("\(messageCount) \(messageCount == 1 ? "message" : "messages")")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.leading, leadingPadding)
-            .padding(.trailing, Metrics.mailboxHeaderHorizontalPadding)
-            .frame(height: Metrics.mailboxHeaderHeight)
-
-            // The 1pt border is attached *below* the content row rather than
-            // carved out of it, so the header content stays a full
-            // `mailboxHeaderHeight` and the border adds 1pt outside it.
-            Rectangle()
-                .fill(Color(nsColor: .separatorColor))
-                .frame(height: Metrics.mailboxHeaderBorderWidth)
+        DetailPaneHeader(
+            systemImage: mailbox.systemImage,
+            title: mailbox.title,
+            leadingPadding: leadingPadding
+        ) {
+            Text("\(messageCount) \(messageCount == 1 ? "message" : "messages")")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
         }
     }
 }

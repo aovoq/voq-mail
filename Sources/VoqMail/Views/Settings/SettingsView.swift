@@ -37,14 +37,6 @@ struct SettingsView: View {
     @Environment(AppNavigation.self) private var navigation
     @Environment(SidebarModel.self) private var sidebarModel
 
-    /// Mirrors the mailbox header: slide the title clear of the traffic lights and
-    /// toggle button when the sidebar is collapsed.
-    private var headerLeadingPadding: CGFloat {
-        sidebarModel.isShown
-            ? Metrics.mailboxHeaderHorizontalPadding
-            : Metrics.mailboxHeaderCollapsedLeadingPadding
-    }
-
     var body: some View {
         VStack(spacing: 0) {
             header
@@ -67,28 +59,14 @@ struct SettingsView: View {
     /// The panel's top bar — same metrics as `MailboxHeaderView` so toggling
     /// between mail and settings doesn't shift the layout under the seam.
     private var header: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 10) {
-                Image(systemName: "gearshape")
-                    .font(.headline)
-                    .foregroundStyle(.secondary)
-
-                Text("Settings")
-                    .font(.headline.weight(.semibold))
-
-                Spacer()
-
-                Button("Done") { navigation.showMailbox() }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.tint)
-            }
-            .padding(.leading, headerLeadingPadding)
-            .padding(.trailing, Metrics.mailboxHeaderHorizontalPadding)
-            .frame(height: Metrics.mailboxHeaderHeight)
-
-            Rectangle()
-                .fill(Color(nsColor: .separatorColor))
-                .frame(height: Metrics.mailboxHeaderBorderWidth)
+        DetailPaneHeader(
+            systemImage: "gearshape",
+            title: "Settings",
+            leadingPadding: sidebarModel.collapsedClearingLeadingPadding
+        ) {
+            Button("Done") { navigation.showMailbox() }
+                .buttonStyle(.plain)
+                .foregroundStyle(.tint)
         }
     }
 
@@ -110,7 +88,7 @@ struct SettingsView: View {
         return Button {
             navigation.settingsTab = tab
         } label: {
-            HStack(spacing: 10) {
+            HStack(spacing: Metrics.sidebarRowContentSpacing) {
                 Image(systemName: tab.systemImage)
                     .frame(width: Metrics.sidebarRowIconWidth)
                     .foregroundStyle(isSelected ? .primary : .secondary)
@@ -120,23 +98,15 @@ struct SettingsView: View {
 
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, 10)
+            .padding(.horizontal, Metrics.sidebarRowContentSpacing)
             .frame(maxWidth: .infinity, minHeight: SettingsMetrics.tabRowHeight, alignment: .leading)
-            .background {
-                RoundedRectangle(cornerRadius: Metrics.sidebarRowCornerRadius)
-                    .fill(isSelected
-                          ? Color(nsColor: .selectedContentBackgroundColor).opacity(Palette.sidebarRowSelectionOpacity)
-                          : .clear)
-            }
-            .padding(.horizontal, 8)
-            .contentShape(Rectangle())
+            .sidebarRowSelection(isSelected: isSelected)
         }
         .buttonStyle(.plain)
     }
 
     // MARK: - Content
 
-    @ViewBuilder
     private var content: some View {
         ScrollView {
             Group {

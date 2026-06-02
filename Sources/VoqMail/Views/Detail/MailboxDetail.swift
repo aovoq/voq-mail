@@ -18,15 +18,6 @@ struct MailboxDetail: View {
     @State private var selectedMessageID: MailMessage.ID?
     @State private var activeDraft: MailDraft?
 
-    /// Slides the header content right of the traffic lights / toggle button when
-    /// the sidebar is collapsed; tracks the toggle animation since it reads
-    /// `isShown` inside the same transaction.
-    private var headerLeadingPadding: CGFloat {
-        sidebarModel.isShown
-            ? Metrics.mailboxHeaderHorizontalPadding
-            : Metrics.mailboxHeaderCollapsedLeadingPadding
-    }
-
     private var messages: [MailMessage] {
         mailStore.messages
     }
@@ -65,7 +56,7 @@ struct MailboxDetail: View {
                     MailboxHeaderView(
                         mailbox: mailbox,
                         messageCount: messages.count,
-                        leadingPadding: headerLeadingPadding
+                        leadingPadding: sidebarModel.collapsedClearingLeadingPadding
                     )
 
                     HStack(spacing: 0) {
