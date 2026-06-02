@@ -58,8 +58,12 @@ struct MainMailSplitView: View {
         }
         .ignoresSafeArea(.container, edges: .top)
         // Load every signed-in / restored account's labels so the sidebar can group
-        // them all. Re-fires when the set of accounts changes (add / remove).
-        .task(id: accountStore.accounts.map(\.id)) { await loadAllLabels() }
+        // them all. Re-runs when the set of accounts changes (add / remove); each
+        // load is owned by LabelStore, so this re-render can't cancel one already
+        // in flight and leave that account stuck empty.
+        .onChange(of: accountStore.accounts.map(\.id), initial: true) { _, _ in
+            loadAllLabels()
+        }
         // Default to the Inbox (or the first label) once labels populate, and keep
         // the selection valid if the label set changes underneath it (e.g. an
         // account is removed).
@@ -84,12 +88,13 @@ struct MainMailSplitView: View {
         allMailboxes.first { $0.id == selection }
     }
 
-    /// Loads labels for each account that has none yet, so re-firing on an account
+    /// Kicks off a label load for every account. `LabelStore.load` is idempotent —
+    /// it skips accounts already loaded or loading — so re-running on an account
     /// add/remove doesn't refetch the accounts already shown.
-    private func loadAllLabels() async {
-        for account in accountStore.accounts where labelStore.mailboxes(for: account.id).isEmpty {
+    private func loadAllLabels() {
+        for account in accountStore.accounts {
             let id = account.id
-            await labelStore.loadLabels(accountID: id) {
+            labelStore.load(accountID: id) {
                 try await accountStore.accessToken(for: id)
             }
         }

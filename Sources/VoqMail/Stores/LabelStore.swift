@@ -27,12 +27,29 @@ final class LabelStore {
     /// and writes its result only if it still matches, so a load suspended at an
     /// await when the account is removed cannot resurrect the deleted labels.
     private var loadGenerationByAccount: [String: Int] = [:]
+    /// The in-flight load Task per account, owned here rather than by a view's
+    /// `.task` so a re-render (e.g. adding an account) can't cancel it and leave
+    /// the account stuck empty. Cleared when the load finishes or the account is
+    /// purged.
+    private var loadTasks: [String: Task<Void, Never>] = [:]
 
     private let client = GmailClient()
 
     /// The mailboxes to show for one account (empty until its labels load).
     func mailboxes(for accountID: String) -> [Mailbox] {
         mailboxesByAccount[accountID] ?? []
+    }
+
+    /// Ensures one account's labels load, owning the Task here so the load runs to
+    /// completion (with its own retries) regardless of view lifecycle. A no-op if
+    /// the labels are already loaded or a load is already in flight; call again
+    /// after an error to retry.
+    func load(accountID: String, token: @escaping @Sendable () async throws -> String) {
+        guard mailboxesByAccount[accountID] == nil, loadTasks[accountID] == nil else { return }
+        loadTasks[accountID] = Task { [weak self] in
+            await self?.loadLabels(accountID: accountID, token: token)
+            self?.loadTasks[accountID] = nil
+        }
     }
 
     /// Whether the given account's labels are currently loading.
@@ -45,9 +62,12 @@ final class LabelStore {
         errorsByAccount[accountID]
     }
 
-    /// Drops an account's labels (used when the account is removed). Bumping the
-    /// generation makes any in-flight load for this account no-op on completion.
+    /// Drops an account's labels (used when the account is removed). Cancels any
+    /// in-flight load and bumps the generation so a load suspended at an await
+    /// can't write back after the account is gone.
     func purge(accountID: String) {
+        loadTasks[accountID]?.cancel()
+        loadTasks[accountID] = nil
         mailboxesByAccount[accountID] = nil
         loadingAccountIDs.remove(accountID)
         errorsByAccount[accountID] = nil
@@ -57,36 +77,59 @@ final class LabelStore {
     /// Loads one account's labels and their unread counts. `token` supplies a
     /// valid access token (it may refresh), so token failures surface here too.
     /// Guarded per account so a concurrent reload of the same account is a no-op
-    /// while different accounts still load in parallel.
-    func loadLabels(accountID: String, token: @escaping @Sendable () async throws -> String) async {
+    /// while different accounts still load in parallel. Private: callers go
+    /// through `load`, which owns the Task so the load survives view re-renders.
+    private func loadLabels(accountID: String, token: @escaping @Sendable () async throws -> String) async {
         guard !loadingAccountIDs.contains(accountID) else { return }
         loadingAccountIDs.insert(accountID)
         errorsByAccount[accountID] = nil
         let generation = loadGenerationByAccount[accountID] ?? 0
         defer { loadingAccountIDs.remove(accountID) }
 
-        do {
-            let accessToken = try await token()
-            let all = try await client.labels(accessToken: accessToken)
-            let displayed = Self.displayedLabels(from: all)
-            // The list endpoint omits counts, so fetch them only for what we show.
-            let detailed = try await client.labels(
-                ids: displayed.map(\.id), concurrency: 5, accessToken: accessToken)
-            // Use the thread (conversation) count so the badge matches Gmail's own
-            // UI, which counts unread conversations rather than unread messages.
-            let unreadByID = Dictionary(
-                detailed.map { ($0.id, $0.threadsUnread ?? 0) },
-                uniquingKeysWith: { first, _ in first })
-            // The account may have been removed (and re-added) while we awaited;
-            // only write back if this load hasn't been superseded.
-            guard (loadGenerationByAccount[accountID] ?? 0) == generation else { return }
-            mailboxesByAccount[accountID] = Self.mailboxes(
-                from: displayed, unreadByID: unreadByID, accountID: accountID)
-        } catch {
-            guard (loadGenerationByAccount[accountID] ?? 0) == generation else { return }
-            errorsByAccount[accountID] = String(describing: error)
+        // Retry transient failures with exponential backoff (1s, 2s) before giving
+        // up; a lingering error then drives the sidebar's manual Retry button.
+        for attempt in 1...Self.maxLoadAttempts {
+            do {
+                let accessToken = try await token()
+                let all = try await client.labels(accessToken: accessToken)
+                let displayed = Self.displayedLabels(from: all)
+                // The list endpoint omits counts, so fetch them only for what we show.
+                let detailed = try await client.labels(
+                    ids: displayed.map(\.id), concurrency: 5, accessToken: accessToken)
+                // Use the thread (conversation) count so the badge matches Gmail's
+                // own UI, which counts unread conversations rather than messages.
+                let unreadByID = Dictionary(
+                    detailed.map { ($0.id, $0.threadsUnread ?? 0) },
+                    uniquingKeysWith: { first, _ in first })
+                // The account may have been removed (and re-added) while we awaited;
+                // only write back if this load hasn't been superseded.
+                guard (loadGenerationByAccount[accountID] ?? 0) == generation else { return }
+                mailboxesByAccount[accountID] = Self.mailboxes(
+                    from: displayed, unreadByID: unreadByID, accountID: accountID)
+                errorsByAccount[accountID] = nil
+                return
+            } catch {
+                // A cancelled load is not a failure: `.task(id:)` restarts this load
+                // whenever the account set changes (e.g. adding an account), which
+                // cancels the in-flight URLSession request (URLError.cancelled, -999)
+                // or the task itself (CancellationError). The restart reloads, so
+                // swallow it rather than retrying or flashing a red error.
+                if error is CancellationError || (error as? URLError)?.code == .cancelled { return }
+                guard (loadGenerationByAccount[accountID] ?? 0) == generation else { return }
+                // Out of attempts: surface the error so the Retry button appears.
+                guard attempt < Self.maxLoadAttempts else {
+                    errorsByAccount[accountID] = String(describing: error)
+                    return
+                }
+                // Back off before the next attempt; a cancel mid-sleep just stops.
+                do { try await Task.sleep(for: .seconds(1 << (attempt - 1))) } catch { return }
+                guard (loadGenerationByAccount[accountID] ?? 0) == generation else { return }
+            }
         }
     }
+
+    /// Total label-load tries (1 initial + backoff retries) before surfacing the error.
+    private static let maxLoadAttempts = 3
 
     // MARK: - Mapping
 
