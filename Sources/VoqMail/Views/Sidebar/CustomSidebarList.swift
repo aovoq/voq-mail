@@ -38,6 +38,16 @@ struct CustomSidebarList: View {
                 .padding(.bottom, 8)
             }
             .scrollContentBackground(.hidden)
+            // Pinned band that occludes rows scrolling up under the window's
+            // traffic-light buttons. Same material as the sidebar background so
+            // the band is seamless; the matching `Color.clear` spacer atop the
+            // list keeps the first row clear of it at rest. Non-hit-testing so
+            // clicks still reach the traffic-light buttons.
+            .overlay(alignment: .top) {
+                VisualEffectBackground(style: .calibratedSidebar)
+                    .frame(height: Metrics.sidebarHeaderTopPadding)
+                    .allowsHitTesting(false)
+            }
 
             AccountStatusView()
         }
