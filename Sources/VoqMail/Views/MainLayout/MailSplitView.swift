@@ -173,7 +173,7 @@ private struct CalibratedSidebarBackground: View {
     let cornerRadius: CGFloat
 
     var body: some View {
-        VisualEffectBackground(style: .calibratedSidebar)
+        CalibratedSidebarMaterial()
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .mask(
                 SidebarPaneSurface(sidebarWidth: sidebarWidth, radius: cornerRadius)

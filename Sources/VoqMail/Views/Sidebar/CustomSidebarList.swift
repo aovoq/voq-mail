@@ -46,7 +46,7 @@ struct CustomSidebarList: View {
             // list keeps the first row clear of it at rest. Non-hit-testing so
             // clicks still reach the traffic-light buttons.
             .overlay(alignment: .top) {
-                VisualEffectBackground(style: .calibratedSidebar)
+                CalibratedSidebarMaterial()
                     .frame(height: Metrics.sidebarHeaderTopPadding)
                     .allowsHitTesting(false)
             }

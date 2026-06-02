@@ -90,6 +90,13 @@ enum Palette {
     /// Hairline divider tracing the curved seam (a light ~230/255 grey).
     static let sidebarDivider = Color(red: 0.902, green: 0.902, blue: 0.902)
 
+    /// Opaque fallback painted *behind* the calibrated sidebar material
+    /// (`CalibratedSidebarMaterial`). It only shows through during the one-frame
+    /// gap while AppKit re-resolves the `.behindWindow` backdrop on a window
+    /// activation change, so it is tuned to approximate the material's resting
+    /// tint — a light, faintly warm grey — to keep that frame inconspicuous.
+    static let sidebarMaterialFallback = Color(red: 0.929, green: 0.925, blue: 0.922)
+
     /// Opacity applied to the system selection color behind a selected sidebar row.
     static let sidebarRowSelectionOpacity: Double = 0.18
 
