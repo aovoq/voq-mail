@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>codex app-server による返信作成の仕組み</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Segoe UI", sans-serif;
+    background: #ffffff; color: #111827; line-height: 1.7;
+    max-width: 1080px; margin: 0 auto; padding: 48px 28px 96px;
+  }
+  .eyebrow { font-size: 13px; font-weight: 700; letter-spacing: .08em; color: #d97706; text-transform: uppercase; }
+  h1 { font-size: 38px; font-weight: 800; letter-spacing: -.02em; margin: 8px 0 12px; }
+  .lede { font-size: 18px; color: #6b7280; max-width: 760px; }
+  h2 { font-size: 24px; font-weight: 800; margin: 56px 0 6px; letter-spacing: -.01em; }
+  h2 .num { color: #d97706; font-variant-numeric: tabular-nums; margin-right: 10px; }
+  .sub { color: #6b7280; font-size: 15px; margin-bottom: 22px; }
+  code { font-family: "SF Mono", ui-monospace, Menlo, monospace; font-size: .88em;
+         background: #f3f4f6; padding: 2px 6px; border-radius: 5px; color: #be4b00; }
+
+  /* headline cards */
+  .cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin: 32px 0 8px; }
+  .card { border: 1px solid #e5e7eb; border-radius: 12px; padding: 18px 16px; background: #fafafa; }
+  .card .big { font-size: 34px; font-weight: 800; letter-spacing: -.03em; line-height: 1.1; }
+  .card .lab { font-size: 13px; color: #6b7280; margin-top: 6px; }
+  .card.accent { background: #fef3c7; border-color: #fcd9a0; }
+  .card.accent .big { color: #b45309; }
+
+  /* layer columns */
+  .layers { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .layer { border-radius: 12px; padding: 18px; border: 1px solid #e5e7eb; }
+  .layer h3 { font-size: 15px; font-weight: 800; margin-bottom: 4px; }
+  .layer .role { font-size: 12.5px; color: #6b7280; margin-bottom: 12px; min-height: 34px; }
+  .layer ul { list-style: none; }
+  .layer li { font-size: 13px; padding: 6px 0; border-top: 1px dashed #e5e7eb; }
+  .layer li:first-child { border-top: none; }
+  .layer li b { font-weight: 700; }
+  .layer.v { background: #eff6ff; border-color: #bfdbfe; }
+  .layer.s { background: #f0fdf4; border-color: #bbf7d0; }
+  .layer.x { background: #fef3c7; border-color: #fcd9a0; }
+  .layer .tag { display:inline-block; font-size:10.5px; font-weight:700; letter-spacing:.05em;
+                padding:2px 8px; border-radius:20px; text-transform:uppercase; margin-bottom:10px; }
+  .layer.v .tag { background:#dbeafe; color:#1d4ed8; }
+  .layer.s .tag { background:#dcfce7; color:#15803d; }
+  .layer.x .tag { background:#fde68a; color:#b45309; }
+
+  /* sequence */
+  .seq { list-style: none; counter-reset: step; }
+  .seq > li { position: relative; padding: 0 0 26px 56px; border-left: 2px solid #e5e7eb; margin-left: 18px; }
+  .seq > li:last-child { border-left: 2px solid transparent; padding-bottom: 0; }
+  .seq > li::before {
+    counter-increment: step; content: counter(step);
+    position: absolute; left: -19px; top: -2px; width: 36px; height: 36px; border-radius: 50%;
+    background: #d97706; color: #fff; font-weight: 800; font-size: 15px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .seq .mname { font-family: "SF Mono", ui-monospace, monospace; font-weight: 700; font-size: 15px; color: #111827; }
+  .seq .dir { font-size: 11px; font-weight: 700; letter-spacing:.05em; margin-left: 8px; padding: 1px 7px; border-radius: 4px; }
+  .dir.req { background: #dbeafe; color: #1d4ed8; }
+  .dir.note { background: #dcfce7; color: #15803d; }
+  .seq p { font-size: 14px; color: #374151; margin-top: 4px; }
+  .seq .meta { font-size: 12.5px; color: #6b7280; margin-top: 3px; }
+
+  /* prompt blocks */
+  .prompt { background: #0f172a; color: #e2e8f0; border-radius: 12px; padding: 20px 22px;
+            font-family: "SF Mono", ui-monospace, monospace; font-size: 12.5px; line-height: 1.65;
+            white-space: pre-wrap; overflow-x: auto; }
+  .prompt .c { color: #fbbf24; }
+  .prompt .g { color: #94a3b8; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  .two h4 { font-size: 13px; font-weight: 800; color: #6b7280; margin-bottom: 8px; text-transform: uppercase; letter-spacing:.04em; }
+
+  /* callout */
+  .callout { border-left: 4px solid #d97706; background: #fffbeb; border-radius: 0 10px 10px 0;
+             padding: 16px 20px; margin: 14px 0; }
+  .callout.green { border-left-color: #16a34a; background: #f0fdf4; }
+  .callout b { font-weight: 800; }
+  .callout p { font-size: 14px; color: #374151; }
+
+  .guards { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+  .guard { border: 1px solid #e5e7eb; border-radius: 10px; padding: 16px 18px; background: #fafafa; }
+  .guard .gt { font-weight: 800; font-size: 14.5px; }
+  .guard .gt .ic { color: #16a34a; margin-right: 6px; }
+  .guard p { font-size: 13px; color: #4b5563; margin-top: 5px; }
+
+  @media (max-width: 820px) {
+    .cards, .layers, .two, .guards { grid-template-columns: 1fr 1fr; }
+    .seq > li { padding-left: 50px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="eyebrow">VoqMail × codex</div>
+<h1>codex app-server に返信を書かせる仕組み</h1>
+<p class="lede">VoqMail は <code>codex</code> CLI の <code>app-server</code> サブコマンドを子プロセスとして起動し、改行区切りの JSON-RPC over stdio で対話する。1往復の「ターン」でメール本文を生成し、トークンを差分ストリームで受け取って即プレビューに流し込む。</p>
+
+<div class="cards">
+  <div class="card accent">
+    <div class="big">stdio</div>
+    <div class="lab">改行区切り JSON-RPC 2.0<br>（子プロセスと双方向）</div>
+  </div>
+  <div class="card">
+    <div class="big">read-only</div>
+    <div class="lab">サンドボックス<br>承認なし・ファイル触らず</div>
+  </div>
+  <div class="card">
+    <div class="big">ephemeral</div>
+    <div class="lab">毎回使い捨て thread<br>前の下書きが混ざらない</div>
+  </div>
+  <div class="card">
+    <div class="big">delta</div>
+    <div class="lab">本文をトークン単位で<br>ストリーム受信</div>
+  </div>
+</div>
+
+<h2><span class="num">01</span>3層のデータフロー</h2>
+<p class="sub">View が指示を受け取り、Store が橋渡しし、actor が codex プロセスを所有する — Services → Stores → Views の流れ（CLAUDE.md の設計どおり）。</p>
+<div class="layers">
+  <div class="layer v">
+    <span class="tag">View</span>
+    <h3>ReplyAssistBar</h3>
+    <div class="role">コンポーザー内の「声のコマンドライン」。自然言語の指示を1行入力。</div>
+    <ul>
+      <li><b>instruction</b> を受け取り <code>generate()</code></li>
+      <li>streaming preview を <code>draftText</code> で表示</li>
+      <li>Insert で本文に確定 → <code>reset()</code></li>
+      <li>Debug log で JSON-RPC を生表示</li>
+    </ul>
+  </div>
+  <div class="layer s">
+    <span class="tag">Store @MainActor</span>
+    <h3>ReplyAssistStore</h3>
+    <div class="role">可用性チェック・プロンプト組み立て・差分を draftText に追記。</div>
+    <ul>
+      <li><b>checkAvailability()</b> 設置 &amp; sign-in 確認</li>
+      <li><b>buildPrompt()</b> 下書き＋指示を整形</li>
+      <li><b>generation</b> カウンタで古い実行を破棄</li>
+      <li>stream を <code>for try await</code> で消費</li>
+    </ul>
+  </div>
+  <div class="layer x">
+    <span class="tag">Service actor</span>
+    <h3>CodexAppServer</h3>
+    <div class="role">子プロセス・stdin・保留リクエスト表・進行中ストリームを所有。</div>
+    <ul>
+      <li>app-server を遅延起動し常駐</li>
+      <li>JSON-RPC の送受信と相関付け</li>
+      <li>thread/turn を駆動し delta を中継</li>
+      <li><b>streamID</b> で世代を識別し競合防止</li>
+    </ul>
+  </div>
+</div>
+
+<h2><span class="num">02</span>1回の生成で流れる JSON-RPC シーケンス</h2>
+<p class="sub">codex-cli 0.136.0 で検証済みのプロトコル。ハンドシェイクは初回のみ、生成のたびに thread/start から新しい使い捨てスレッドを切る。</p>
+<ol class="seq">
+  <li>
+    <span class="mname">initialize</span><span class="dir req">request</span>
+    <p>clientInfo（voq-mail）と <code>experimentalApi: true</code> を送り、v2 の thread/turn メソッドを有効化。<b>初回1度だけ</b>。</p>
+  </li>
+  <li>
+    <span class="mname">account/read</span><span class="dir req">request</span>
+    <p>サインイン済みアカウントを確認。<code>account</code> が無ければ <code>notAuthenticated</code> を投げて生成中止。</p>
+  </li>
+  <li>
+    <span class="mname">thread/start</span><span class="dir req">request</span>
+    <p>新しいスレッドを開始。<code>sandbox: "read-only"</code> / <code>approvalPolicy: "never"</code> / <code>ephemeral: true</code>、cwd は一時ディレクトリ。ここで <b>developerInstructions</b>（システム役割）を渡す。</p>
+    <p class="meta">→ 返ってきた thread.id で active slot を設置（最初の delta を取りこぼさないよう turn/start の前に）</p>
+  </li>
+  <li>
+    <span class="mname">turn/start</span><span class="dir req">request</span>
+    <p>ユーザー入力として <b>prompt</b>（宛先・件名・元メッセージ・既存下書き・指示）を 1つの text input で送信。turn.id を控える。</p>
+  </li>
+  <li>
+    <span class="mname">item/agentMessage/delta</span><span class="dir note">notification ×N</span>
+    <p>本文がトークン断片で次々と届く。reader が threadId で照合し、active な continuation に <code>yield(delta)</code> → Store が <code>draftText.append</code> → プレビューに即反映。</p>
+  </li>
+  <li>
+    <span class="mname">turn/completed</span><span class="dir note">notification</span>
+    <p>ターン終了。continuation を <code>finish()</code> し、active slot をクリア。<code>error</code> 通知なら <code>turnFailed</code> で終わる。</p>
+  </li>
+</ol>
+
+<h2><span class="num">03</span>codex に渡す2つのプロンプト</h2>
+<p class="sub">「役割の固定指示」と「毎回の文脈」を分離。前者は thread/start の developerInstructions、後者は turn/start の input。</p>
+<div class="two">
+  <div>
+    <h4>developerInstructions（役割・固定）</h4>
+    <div class="prompt"><span class="g">// thread/start に同梱</span>
+You are VoqMail's reply-drafting
+assistant...
+
+<span class="c">Rules:</span>
+- 本文テキスト<b>のみ</b>出力
+  （件名/markdown/引用符なし）
+- 元メッセージを引用し返さない
+  （ヘッダでスレッド化される）
+- 会話と<b>同じ言語</b>で書く
+  （多くは日本語・敬語を選ぶ）
+- 指示に厳密に従い、文脈に
+  無い事実を<b>捏造しない</b>
+- そのまま送れる文面にする</div>
+  </div>
+  <div>
+    <h4>prompt（毎回の文脈）</h4>
+    <div class="prompt"><span class="g">// turn/start の input.text</span>
+To: <span class="g">{宛先}</span>
+Subject: <span class="g">{件名}</span>
+
+<span class="c">返信対象の本文（文脈のみ・</span>
+<span class="c">引用し返さない）:</span>
+"""{元メッセージ}"""
+
+<span class="c">ユーザーが既に書いた下書き:</span>
+"""{下書き or (empty)}"""
+
+<span class="c">どう書くかの指示:</span>
+{instruction}
+
+Write the final email body now.</div>
+  </div>
+</div>
+<div class="callout">
+  <p><b>狙い：</b>元メッセージと既存下書きを <b>読み取り専用の文脈</b>として渡すことで、モデルが事実を捏造せず根拠のある返信を書けるようにしている。出力は本文だけなので、そのままコンポーザーに差し込める。</p>
+</div>
+
+<h2><span class="num">04</span>取りこぼし・競合・ハングを防ぐ仕掛け</h2>
+<p class="sub">actor は <code>await</code> ごとに割り込むので、Regenerate 連打でも古い実行が現在の状態を踏まないよう多重に守られている。</p>
+<div class="guards">
+  <div class="guard">
+    <div class="gt"><span class="ic">✓</span>世代カウンタ（2層）</div>
+    <p>Store の <code>generation</code> と actor の <code>latestStreamID</code> / <code>activeStreamID</code>。各 await 後の書き込み前に「まだ自分が最新か」を確認し、超過した実行の delta や末尾の <code>isGenerating=false</code> を無効化。</p>
+  </div>
+  <div class="guard">
+    <div class="gt"><span class="ic">✓</span>キャンセル＝turn 中断</div>
+    <p>ストリーム終了（onTermination）で <code>turn/interrupt</code> を送り課金を止める。turn.id 未確定の中断は <code>interruptPendingThreadIDs</code> に積んで、id 到着後に処理。</p>
+  </div>
+  <div class="guard">
+    <div class="gt"><span class="ic">✓</span>タイムアウト2種</div>
+    <p>request は 30秒、turn は 120秒の上限。生きたままハングした子プロセスが UI を永久に「生成中」に縛らないよう、強制的に finish。</p>
+  </div>
+  <div class="guard">
+    <div class="gt"><span class="ic">✓</span>ブロッキング読みを隔離</div>
+    <p>stdout の blocking read は専用 GCD キューで実行し、AsyncStream で actor 側へ。actor の executor を塞いで <code>runGeneration</code> とデッドロックするのを回避。</p>
+  </div>
+  <div class="guard">
+    <div class="gt"><span class="ic">✓</span>承認要求は即拒否</div>
+    <p>read-only で承認オフのため本来来ないが、id+method を持つサーバ発リクエストは <code>-32601</code> で防御的に拒否し、サーバが待ち続けないようにする。</p>
+  </div>
+  <div class="guard">
+    <div class="gt"><span class="ic">✓</span>切断時に全 waiter を解放</div>
+    <p>子プロセスが EOF（終了）したら pending・login・active の全 continuation を失敗させ、呼び出し側がハングしない。</p>
+  </div>
+</div>
+
+<h2><span class="num">05</span>その前提：バイナリ発見とサインイン</h2>
+<p class="sub">codex は ~187MB あるためバンドルせず、システムの既存インストールを検出する BYO 方式。</p>
+<div class="callout green">
+  <p><b>CodexLocator：</b>Finder 起動の .app はシェル PATH を継承しないので、まず絶対パス候補（<code>~/.local/bin</code>、Homebrew、cargo…）を当たり、無ければ <code>$SHELL -lc 'command -v codex'</code> でログインシェルに解決させる。<code>--version</code> を読み <b>0.125.0 以上</b>を要求する。</p>
+</div>
+<div class="callout">
+  <p><b>サインイン：</b>codex 未ログインなら <code>account/login/start</code>（type=chatgpt）で authUrl を取得 → ブラウザを開く → codex がローカルコールバックを受け、<code>account/login/completed</code> 通知を loginId で待ち受けて完了。可用性は再チェックされ <code>ready</code> になる。</p>
+</div>
+
+<h2><span class="num">06</span>剥がし方（分離度）</h2>
+<p class="sub">この機能は <b>レイヤ構成を保ったまま</b>、ほぼ「ファイル削除＋数行削除」で外せるよう配線されている。コア model（<code>MailMessage.swift</code>）はリファクタ後 <b>1行も編集不要</b>な素の状態に戻っている。</p>
+<div class="callout green">
+  <p><b>1. feature 所有ファイルを削除（11個）：</b>
+  <code>Services/CodexLocator.swift</code>・<code>Services/CodexProtocol.swift</code>・<code>Services/CodexAppServer.swift</code>・<code>Services/CodexLogEntry.swift</code>・<code>Services/HTMLPlainTextExtractor.swift</code>・<code>Services/ReplyPromptBuilder.swift</code>・<code>Stores/ReplyAssistStore.swift</code>・<code>Views/Detail/ReplyAssistBar.swift</code>・<code>Views/Detail/ComposerAssistSection.swift</code>（<code>ComposerAssistSection</code> と <code>ComposerAssistToggle</code> の 2 struct を 1 ファイルに同梱）・<code>Models/MailMessage+ReplyAssist.swift</code>・<code>docs/codex-reply-generation.html</code>（このファイル）。</p>
+</div>
+<div class="callout">
+  <p><b>2. 残る配線行を grep で消す：</b><code>grep -rn 'reply-assist:'</code> が拾う ~10 行だけ。
+  <code>MailDraft.swift</code>（field 1＋init 代入 2。<code>:86</code> の <code>originalText: message.plainTextBody</code> は <code>MailMessage+ReplyAssist.swift</code> の削除と同時に消す）／<code>VoqMailApp.swift</code>（@State 1＋引数 1）／<code>ContentView.swift</code>（property 1＋<code>.environment</code> 1＋#Preview 1）／<code>MailboxDetail.swift</code>（@Environment 1＋<code>assist:</code> 引数 1）／<code>ComposerView.swift</code>（optional な <code>assist</code> param＋<code>ComposerAssistSection</code>／<code>ComposerAssistToggle</code> の呼び出し）。</p>
+</div>
+<div class="callout">
+  <p><b>3. 触らなくていいもの：</b><code>MailMessage.swift</code> はゼロ編集（HTML→text 抽出は <code>HTMLPlainTextExtractor</code>＋拡張へ退避済み、AppKit 依存も Models 層から排除）。<code>CodexAppServer.swift</code> は <code>private</code> な状態で繊細な並行契約を守るため <b>分割せず</b>一枚岩のまま＝削除も一括。</p>
+</div>
+
+</body>
+</html>

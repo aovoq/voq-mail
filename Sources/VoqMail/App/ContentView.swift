@@ -16,6 +16,7 @@ struct ContentView: View {
     let labelStore: LabelStore
     let contentStore: MessageContentStore
     let sendStore: SendStore
+    let replyAssistStore: ReplyAssistStore  // reply-assist:
 
     var body: some View {
         MainMailSplitView()
@@ -26,6 +27,7 @@ struct ContentView: View {
             .environment(labelStore)
             .environment(contentStore)
             .environment(sendStore)
+            .environment(replyAssistStore)  // reply-assist:
             // WindowChromeConfigurator renders nothing; it is attached only for its
             // side effect of reaching and configuring the enclosing NSWindow.
             .background(WindowChromeConfigurator())
@@ -54,5 +56,6 @@ struct ContentView: View {
         mailStore: MailStore(),
         labelStore: LabelStore(),
         contentStore: MessageContentStore(),
-        sendStore: SendStore())
+        sendStore: SendStore(),
+        replyAssistStore: ReplyAssistStore())  // reply-assist:
 }

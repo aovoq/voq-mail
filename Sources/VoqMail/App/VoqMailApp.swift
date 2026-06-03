@@ -26,6 +26,9 @@ struct VoqMailApp: App {
     // Per-account send-in-flight state, partitioned like the other stores (issue
     // #8) so a send completion can't surface on another account's UI.
     @State private var sendStore = SendStore()
+    // reply-assist: AI reply-drafting state (codex app-server). Shared (one
+    // composer is open at a time), so it isn't partitioned by account.
+    @State private var replyAssistStore = ReplyAssistStore()
 
     var body: some Scene {
         WindowGroup("") {
@@ -36,7 +39,8 @@ struct VoqMailApp: App {
                 mailStore: mailStore,
                 labelStore: labelStore,
                 contentStore: contentStore,
-                sendStore: sendStore)
+                sendStore: sendStore,
+                replyAssistStore: replyAssistStore)  // reply-assist:
                 .frame(minWidth: WindowMetrics.minSize.width, minHeight: WindowMetrics.minSize.height)
         }
         .defaultSize(width: WindowMetrics.defaultSize.width, height: WindowMetrics.defaultSize.height)

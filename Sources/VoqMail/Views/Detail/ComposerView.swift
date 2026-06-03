@@ -15,6 +15,10 @@ struct ComposerView: View {
     /// is pinned to the account that received the original, so the picker collapses
     /// to a static address there.
     var accounts: [Account] = []
+    // reply-assist: drives the AI reply-drafting panel (codex). Optional so the
+    // composer compiles and behaves identically without the feature; nil hides
+    // all assist UI. The panel/insert logic lives in ComposerAssistSection.
+    var assist: ReplyAssistStore? = nil
     let onCancel: () -> Void
     let onSend: () -> Void
     /// Set while a send is in flight: disables the form and shows progress. Held by
@@ -26,6 +30,10 @@ struct ComposerView: View {
     /// Cc/Bcc start hidden to keep the common case uncluttered; revealed on demand
     /// (or immediately when a draft already carries either, e.g. an edited reply).
     @State private var showsCcBcc = false
+    // reply-assist: the AI assist panel is opt-in, revealed from the footer so the
+    // common type-it-yourself path stays uncluttered. Hoisted here only so the
+    // footer toggle and the body panel (ComposerAssistSection) share one flag.
+    @State private var showsAssist = false
     @FocusState private var focus: Field?
 
     private enum Field { case to, subject, body }
@@ -51,6 +59,13 @@ struct ComposerView: View {
                 attachmentStrip
                     .disabled(isSending)
             }
+            // reply-assist: opt-in AI drafting panel (no-op when assist is nil).
+            ComposerAssistSection(
+                assist: assist,
+                draft: draft,
+                bodyText: $draft.body,
+                isSending: isSending,
+                showsAssist: $showsAssist)
             Divider()
             footer
         }
@@ -240,6 +255,13 @@ struct ComposerView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+
+            // reply-assist: footer toggle for the AI panel (absent when assist is nil).
+            ComposerAssistToggle(
+                showsAssist: $showsAssist,
+                isSending: isSending,
+                isAvailable: assist != nil)
+
             Spacer()
             if let errorMessage {
                 Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
