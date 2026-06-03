@@ -30,6 +30,10 @@ struct GmailMessage: Decodable {
     let snippet: String?
     /// Milliseconds since the epoch, as a string (Gmail's internal receipt time).
     let internalDate: String?
+    /// The account `historyId` as of the last change to this message. Returned in
+    /// every format; the max across a freshly-listed page seeds the incremental-sync
+    /// checkpoint (issue #13) without a separate `getProfile` round trip.
+    let historyId: String?
     let payload: Payload?
 
     struct Payload: Decodable {
@@ -71,6 +75,41 @@ extension Data {
 /// `users.labels.list` response.
 struct GmailLabelList: Decodable {
     let labels: [GmailLabel]?
+}
+
+/// `users.history.list` response (issue #13). Carries the diff records since the
+/// requested `startHistoryId`, the newest `historyId` (the next checkpoint), and a
+/// `nextPageToken` when the diff spans multiple pages.
+struct GmailHistoryList: Decodable {
+    let history: [GmailHistory]?
+    let historyId: String?
+    let nextPageToken: String?
+}
+
+/// One history record. Each change kind carries the affected message resource
+/// (id/threadId plus its current `labelIds`), which is enough to route the change
+/// to the right cached mailbox; label changes also list the labels that moved.
+struct GmailHistory: Decodable {
+    let id: String
+    let messagesAdded: [MessageChange]?
+    let messagesDeleted: [MessageChange]?
+    let labelsAdded: [LabelChange]?
+    let labelsRemoved: [LabelChange]?
+
+    struct MessageRef: Decodable {
+        let id: String
+        let threadId: String?
+        let labelIds: [String]?
+    }
+
+    struct MessageChange: Decodable {
+        let message: MessageRef
+    }
+
+    struct LabelChange: Decodable {
+        let message: MessageRef
+        let labelIds: [String]?
+    }
 }
 
 /// A Gmail label. `users.labels.list` populates only id/name/type; the unread and

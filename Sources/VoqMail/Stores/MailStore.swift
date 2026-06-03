@@ -13,6 +13,7 @@
 
 import Foundation
 import Observation
+import SwiftData
 
 @Observable
 @MainActor
@@ -44,6 +45,20 @@ final class MailStore {
 
     private let client = GmailClient()
 
+    /// The SwiftData-backed cache (issue #12). Nil until `attach(context:)` runs at
+    /// app launch; cache reads/writes are no-ops while nil so previews work unattached.
+    private var cache: MailCache?
+
+    /// Accounts with a `historySync` in flight, so the focus and interval pollers
+    /// (issue #13) firing together don't run the same diff twice.
+    private var syncingAccounts: Set<String> = []
+
+    /// Binds the store to the app's persistent cache. Called once at composition
+    /// (ContentView) before any account restore, so the first load can paint from disk.
+    func attach(context: ModelContext) {
+        cache = MailCache(context: context)
+    }
+
     // MARK: - Active-account view
 
     private var active: AccountMessages {
@@ -65,10 +80,14 @@ final class MailStore {
         statesByAccount[accountID] ?? AccountMessages()
     }
 
-    /// Drops an account's message state (used when the account is removed).
+    /// Drops an account's message state (used when the account is removed). Also
+    /// clears its cached messages and sync checkpoint so a removed account leaves
+    /// nothing on disk to resurrect (issue #8 / #12).
     func purge(accountID: String) {
         statesByAccount[accountID] = nil
         if activeAccountID == accountID { activeAccountID = nil }
+        cache?.deleteAllMessages(accountID: accountID)
+        cache?.deleteSyncState(accountID: accountID)
     }
 
     // MARK: - Loading
@@ -91,6 +110,24 @@ final class MailStore {
         }
         s.loaded = mailbox
         statesByAccount[accountID] = s
+
+        // Cache-first (issue #12): paint the stored rows immediately so the list
+        // shows without waiting on the network — the fetch below becomes a
+        // background refresh that overwrites them. Skipped when the list already
+        // holds messages (a same-mailbox reload keeps them visible). Honors the
+        // load generation like every write here.
+        if let cache, s.messages.isEmpty {
+            let cached = cache.messages(
+                accountID: accountID, labelID: mailbox.gmailLabelID,
+                mailboxID: mailbox.id, limit: Self.pageSize)
+            if !cached.isEmpty, statesByAccount[accountID]?.loadGeneration == generation {
+                var s = state(for: accountID)
+                s.messages = cached
+                s.isLoading = false
+                statesByAccount[accountID] = s
+            }
+        }
+
         defer {
             if var s = statesByAccount[accountID], s.loadGeneration == generation {
                 s.isLoading = false
@@ -105,12 +142,18 @@ final class MailStore {
                     pageToken: nil, concurrency: 5, accessToken: accessToken)
             }
             guard statesByAccount[accountID]?.loadGeneration == generation else { return }
-            var s = state(for: accountID)
-            s.messages = page.messages
+            let fresh = page.messages
                 .map { MailMessage(gmail: $0, accountID: accountID, mailboxID: mailbox.id) }
                 .sorted { $0.receivedAt > $1.receivedAt }
+            var s = state(for: accountID)
+            s.messages = fresh
             s.nextPageToken = page.nextPageToken
             statesByAccount[accountID] = s
+            // Write through to the cache and seed the incremental-sync checkpoint
+            // (issue #13) from the freshest message's historyId, only if none is set
+            // yet — once seeded, `historySync` owns advancing it.
+            cache?.upsert(fresh)
+            seedHistoryIdIfNeeded(from: page.messages, accountID: accountID)
         } catch {
             // A cancellation is the expected outcome of switching mailboxes mid-load;
             // a lapsed token is already surfaced by the re-auth banner (issue #11).
@@ -169,6 +212,7 @@ final class MailStore {
             s.messages = (s.messages + added).sorted { $0.receivedAt > $1.receivedAt }
             s.nextPageToken = page.nextPageToken
             statesByAccount[accountID] = s
+            cache?.upsert(added)
         } catch {
             guard statesByAccount[accountID]?.loadGeneration == generation,
                   shouldSurface(error) else { return }
@@ -200,6 +244,8 @@ final class MailStore {
             ? previous.filter { $0 != "UNREAD" }
             : previous + ["UNREAD"]
         statesByAccount[accountID] = s
+        // Keep the cached row's read state in step with the optimistic flip.
+        cache?.setLabels(accountID: accountID, gmailID: messageID, labelIds: s.messages[index].labelIds)
 
         do {
             try await authorizer.performGmailRequest(for: accountID) { accessToken in
@@ -221,7 +267,164 @@ final class MailStore {
                 s.errorMessage = String(describing: error)
             }
             statesByAccount[accountID] = s
+            cache?.setLabels(accountID: accountID, gmailID: messageID, labelIds: previous)
         }
+    }
+
+    // MARK: - Incremental sync (issue #13)
+
+    /// Pulls `users.history.list` from the account's saved checkpoint and applies
+    /// the diff (new / deleted / relabelled messages) to the cache and — when this
+    /// account is the active one — to the visible list, so new mail appears without
+    /// a restart. A 404 (checkpoint older than Gmail's history retention) falls back
+    /// to a full re-sync. A no-op until the checkpoint is seeded by the first `load`.
+    func historySync(accountID: String, authorizer: any GmailRequestAuthorizing) async {
+        guard let cache, let startHistoryId = cache.lastHistoryId(accountID: accountID),
+              !syncingAccounts.contains(accountID) else { return }
+        syncingAccounts.insert(accountID)
+        defer { syncingAccounts.remove(accountID) }
+        let generation = state(for: accountID).loadGeneration
+
+        do {
+            let (records, newHistoryId) = try await authorizer.performGmailRequest(for: accountID) { accessToken in
+                try await self.fetchHistory(startHistoryId: startHistoryId, accessToken: accessToken)
+            }
+            guard !records.isEmpty else {
+                if let newHistoryId { cache.setLastHistoryId(newHistoryId, accountID: accountID) }
+                return
+            }
+            try await applyHistory(
+                records, accountID: accountID, generation: generation, authorizer: authorizer)
+            cache.setLastHistoryId(newHistoryId ?? startHistoryId, accountID: accountID)
+        } catch let error as GmailError where error.isHistoryGone {
+            // The checkpoint is older than Gmail's ~1-week history retention. Clear it
+            // and full-resync the visible mailbox; non-active accounts re-sync the next
+            // time the user opens them (their `load` reseeds the checkpoint).
+            cache.setLastHistoryId(nil, accountID: accountID)
+            await reloadActive(accountID: accountID, authorizer: authorizer)
+        } catch {
+            // Cancellation, a lapsed credential (owned by the re-auth banner, issue
+            // #11), or a transient failure: leave the checkpoint so the next poll
+            // retries the same diff rather than skipping it.
+        }
+    }
+
+    /// Walks every page of the history diff under one token, returning the records
+    /// and the newest `historyId` to checkpoint at.
+    private func fetchHistory(
+        startHistoryId: String, accessToken: String
+    ) async throws -> (records: [GmailHistory], historyId: String?) {
+        var records: [GmailHistory] = []
+        var latestHistoryId: String?
+        var pageToken: String?
+        repeat {
+            let page = try await client.history(
+                startHistoryId: startHistoryId, pageToken: pageToken, accessToken: accessToken)
+            records.append(contentsOf: page.history ?? [])
+            latestHistoryId = page.historyId ?? latestHistoryId
+            pageToken = page.nextPageToken
+        } while pageToken != nil
+        return (records, latestHistoryId)
+    }
+
+    /// Reduces the diff to deletions + each surviving message's current labels, then
+    /// applies it to the cache and (if active) the in-memory list. Hydrates metadata
+    /// only for messages not already cached; existing rows are just relabelled.
+    private func applyHistory(
+        _ records: [GmailHistory], accountID: String, generation: Int,
+        authorizer: any GmailRequestAuthorizing
+    ) async throws {
+        guard let cache else { return }
+
+        // Fold the chronological records into a final state per message id.
+        var deleted: Set<String> = []
+        var currentLabels: [String: [String]] = [:]
+        for record in records {
+            for change in record.messagesDeleted ?? [] {
+                deleted.insert(change.message.id)
+                currentLabels[change.message.id] = nil
+            }
+            for change in record.messagesAdded ?? [] {
+                deleted.remove(change.message.id)
+                currentLabels[change.message.id] = change.message.labelIds ?? []
+            }
+            for change in (record.labelsAdded ?? []) + (record.labelsRemoved ?? []) {
+                guard !deleted.contains(change.message.id) else { continue }
+                currentLabels[change.message.id] =
+                    change.message.labelIds ?? currentLabels[change.message.id] ?? []
+            }
+        }
+
+        // Hydrate metadata for surviving messages we don't already hold. A per-id 404
+        // (a message added then deleted after the snapshot) is skipped, but any other
+        // failure throws out of here so `historySync` leaves the checkpoint un-advanced
+        // and the same diff is retried next poll — a transient blip must not silently
+        // drop a diff's worth of genuinely-new mail.
+        let toHydrate = currentLabels.keys.filter { !cache.hasMessage(accountID: accountID, gmailID: $0) }
+        var hydrated: [String: GmailMessage] = [:]
+        if !toHydrate.isEmpty {
+            let fetched = try await authorizer.performGmailRequest(for: accountID) { accessToken in
+                try await self.client.messagesMetadata(
+                    ids: Array(toHydrate), concurrency: 5, accessToken: accessToken)
+            }
+            hydrated = Dictionary(fetched.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        }
+
+        // Authoritative final labels per surviving id: a freshly-fetched message's
+        // labels are more current than the history snapshot, so they win. Built as a
+        // separate map so nothing is mutated mid-iteration below.
+        var finalLabels = currentLabels
+        for (id, gmail) in hydrated {
+            finalLabels[id] = gmail.labelIds ?? finalLabels[id] ?? []
+        }
+
+        // Apply to the cache: deletions, then insert (hydrated) or relabel (existing).
+        cache.deleteMessages(accountID: accountID, gmailIDs: deleted)
+        var upserts: [MailMessage] = []
+        for (id, labels) in finalLabels {
+            if let gmail = hydrated[id] {
+                upserts.append(MailMessage(gmail: gmail, accountID: accountID, mailboxID: ""))
+            } else {
+                cache.setLabels(accountID: accountID, gmailID: id, labelIds: labels)
+            }
+        }
+        cache.upsert(upserts)
+
+        // Reflect the diff in the visible list only when this account is active and a
+        // mailbox is loaded — mirrors `reloadActive`'s rule of not touching a
+        // non-visible account's list. Honor the captured generation.
+        guard activeAccountID == accountID,
+              statesByAccount[accountID]?.loadGeneration == generation,
+              let mailbox = statesByAccount[accountID]?.loaded else { return }
+        let label = mailbox.gmailLabelID
+        var s = state(for: accountID)
+        var messages = s.messages
+        messages.removeAll { deleted.contains($0.id) }
+        for (id, labels) in finalLabels {
+            let belongs = labels.contains(label)
+            if let index = messages.firstIndex(where: { $0.id == id }) {
+                if belongs { messages[index].labelIds = labels } else { messages.remove(at: index) }
+            } else if belongs {
+                if let gmail = hydrated[id] {
+                    messages.append(MailMessage(gmail: gmail, accountID: accountID, mailboxID: mailbox.id))
+                } else if let cached = cache.message(accountID: accountID, gmailID: id, mailboxID: mailbox.id) {
+                    messages.append(cached)
+                }
+            }
+        }
+        s.messages = messages.sorted { $0.receivedAt > $1.receivedAt }
+        statesByAccount[accountID] = s
+    }
+
+    /// Seeds the incremental-sync checkpoint from the freshest message's `historyId`
+    /// after a full load, but only if none is set yet — `historySync` owns advancing
+    /// it from there. Using the max over the fetched page guarantees no gap: any
+    /// change newer than the snapshot carries a higher id and so is returned by the
+    /// next `history.list`.
+    private func seedHistoryIdIfNeeded(from messages: [GmailMessage], accountID: String) {
+        guard let cache, cache.lastHistoryId(accountID: accountID) == nil else { return }
+        guard let maxHistoryId = messages.compactMap({ $0.historyId.flatMap(UInt64.init) }).max() else { return }
+        cache.setLastHistoryId(String(maxHistoryId), accountID: accountID)
     }
 }
 

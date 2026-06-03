@@ -11,6 +11,7 @@
 
 import Foundation
 import Observation
+import SwiftData
 
 @Observable
 @MainActor
@@ -34,6 +35,16 @@ final class LabelStore {
     private var loadTasks: [String: Task<Void, Never>] = [:]
 
     private let client = GmailClient()
+
+    /// The SwiftData-backed cache (issue #12). Nil until `attach(context:)` runs at
+    /// launch; reads/writes no-op while nil so previews work unattached.
+    private var cache: MailCache?
+
+    /// Binds the store to the app's persistent cache. Called once at composition
+    /// (ContentView) before any account restore, so the sidebar paints from disk.
+    func attach(context: ModelContext) {
+        cache = MailCache(context: context)
+    }
 
     /// The mailboxes to show for one account (empty until its labels load).
     func mailboxes(for accountID: String) -> [Mailbox] {
@@ -88,6 +99,7 @@ final class LabelStore {
         loadingAccountIDs.remove(accountID)
         errorsByAccount[accountID] = nil
         loadGenerationByAccount[accountID, default: 0] &+= 1
+        cache?.deleteAllLabels(accountID: accountID)
     }
 
     /// Loads one account's labels and their unread counts. `authorizer` supplies a
@@ -102,6 +114,16 @@ final class LabelStore {
         errorsByAccount[accountID] = nil
         let generation = loadGenerationByAccount[accountID] ?? 0
         defer { loadingAccountIDs.remove(accountID) }
+
+        // Cache-first (issue #12): paint the stored mailboxes immediately so the
+        // sidebar populates without waiting on the network. Only when nothing is
+        // loaded yet — a reload keeps the current rows until the fresh ones arrive.
+        if let cache, mailboxesByAccount[accountID] == nil {
+            let cached = cache.mailboxes(accountID: accountID)
+            if !cached.isEmpty, (loadGenerationByAccount[accountID] ?? 0) == generation {
+                mailboxesByAccount[accountID] = cached
+            }
+        }
 
         // Retry transient failures with exponential backoff (1s, 2s) before giving
         // up; a lingering error then drives the sidebar's manual Retry button.
@@ -126,6 +148,7 @@ final class LabelStore {
                 guard (loadGenerationByAccount[accountID] ?? 0) == generation else { return }
                 mailboxesByAccount[accountID] = mailboxes
                 errorsByAccount[accountID] = nil
+                cache?.replaceMailboxes(mailboxes, accountID: accountID)
                 return
             } catch {
                 // A cancelled load is not a failure: `.task(id:)` restarts this load

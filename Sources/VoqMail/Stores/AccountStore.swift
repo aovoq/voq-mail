@@ -103,7 +103,13 @@ final class AccountStore: GmailRequestAuthorizing {
     /// account that fails to restore does not block the others.
     func restoreAccounts() async {
         do {
-            for email in try keychain.storedAccountEmails() {
+            let emails = try keychain.storedAccountEmails()
+            // Show the saved accounts immediately from their Keychain emails (the
+            // account id) so the sidebar labels and message list can paint from the
+            // cache without waiting on the network (issue #12). The refresh below then
+            // confirms each credential and corrects the display address.
+            for email in emails { upsert(Account(email: email, displayName: nil)) }
+            for email in emails {
                 do {
                     let token = try await accessToken(for: email)
                     let address = try await profiles.emailAddress(accessToken: token)

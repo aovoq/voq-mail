@@ -6,6 +6,8 @@
 //  as an invisible background so the host NSWindow receives its custom chrome.
 //
 
+import AppKit
+import SwiftData
 import SwiftUI
 
 struct ContentView: View {
@@ -17,6 +19,7 @@ struct ContentView: View {
     let contentStore: MessageContentStore
     let sendStore: SendStore
     let replyAssistStore: ReplyAssistStore  // reply-assist:
+    let modelContainer: ModelContainer
 
     var body: some View {
         MainMailSplitView()
@@ -32,11 +35,14 @@ struct ContentView: View {
             // side effect of reaching and configuring the enclosing NSWindow.
             .background(WindowChromeConfigurator())
             .ignoresSafeArea(.container, edges: .top)
-            // Wire the per-account purge once (the stores aren't reachable from
-            // AccountStore itself), then restore previously signed-in accounts
-            // (refresh token → access token → address) so the app shows signed-in
-            // state without a re-login.
+            // Attach the persistent cache to the stores (issue #12) *before* restoring
+            // accounts, so the first label/message load can paint from disk without
+            // waiting on the network. Then wire the per-account purge/reauth hooks,
+            // restore previously signed-in accounts, and start incremental polling.
             .task {
+                mailStore.attach(context: modelContainer.mainContext)
+                labelStore.attach(context: modelContainer.mainContext)
+
                 accountStore.onAccountRemoved = { [labelStore, mailStore, contentStore, sendStore] id in
                     labelStore.purge(accountID: id)
                     mailStore.purge(accountID: id)
@@ -52,7 +58,35 @@ struct ContentView: View {
                     Task { await mailStore.reloadActive(accountID: id, authorizer: accountStore) }
                 }
                 await accountStore.restoreAccounts()
+
+                startIncrementalSync()
             }
+    }
+
+    /// Drives incremental sync (issue #13): poll every signed-in account's
+    /// `history.list` on a fixed cadence, and immediately whenever the app regains
+    /// focus. Accounts behind the re-auth banner are skipped so a lapsed credential
+    /// doesn't burn polls. The pollers are fire-and-forget on the root view, which
+    /// lives for the app's lifetime.
+    private func startIncrementalSync() {
+        @Sendable @MainActor func syncAll() async {
+            for account in accountStore.accounts where !accountStore.needsReauthentication(account.id) {
+                await mailStore.historySync(accountID: account.id, authorizer: accountStore)
+            }
+        }
+        // Focus sync: every app activation (return-to-app) triggers a poll.
+        Task { @MainActor in
+            let activations = NotificationCenter.default.notifications(
+                named: NSApplication.didBecomeActiveNotification)
+            for await _ in activations { await syncAll() }
+        }
+        // Interval sync: poll on a fixed cadence between activations.
+        Task { @MainActor in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(SyncMetrics.pollInterval))
+                await syncAll()
+            }
+        }
     }
 }
 
@@ -65,5 +99,8 @@ struct ContentView: View {
         labelStore: LabelStore(),
         contentStore: MessageContentStore(),
         sendStore: SendStore(),
-        replyAssistStore: ReplyAssistStore())  // reply-assist:
+        replyAssistStore: ReplyAssistStore(),  // reply-assist:
+        modelContainer: try! ModelContainer(
+            for: Schema([CachedMessage.self, CachedLabel.self, SyncState.self]),
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)))
 }

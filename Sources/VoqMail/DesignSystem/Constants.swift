@@ -115,6 +115,16 @@ enum Motion {
     static let sidebarCollapse = Animation.timingCurve(0.55, 0.0, 0.20, 1.0, duration: 0.34)
 }
 
+// MARK: - Sync
+
+/// Background-sync cadence (issue #13). Each account's `history.list` is polled
+/// this often; the window-focus notification covers a return-to-app between ticks.
+/// 45s sits in the issue's 30–60s window — frequent enough that new mail surfaces
+/// promptly, sparse enough to stay within per-user rate limits.
+enum SyncMetrics {
+    static let pollInterval: TimeInterval = 45
+}
+
 // MARK: - Palette
 
 /// Named colors used by the custom chrome.
