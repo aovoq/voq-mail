@@ -41,6 +41,10 @@ struct MailDraft: Identifiable, Hashable {
     /// References header chain that threads the reply.
     var references: String?
     var replyingToMessageID: MailMessage.ID?
+    // reply-assist: plain-text body of the message being replied to, carried as
+    // grounding context for AI reply drafting (the visible `body` only holds a
+    // short quoted snippet). Nil for a fresh compose.
+    var originalText: String?
 }
 
 extension MailDraft {
@@ -59,7 +63,8 @@ extension MailDraft {
             draftId: nil,
             inReplyTo: nil,
             references: nil,
-            replyingToMessageID: nil
+            replyingToMessageID: nil,
+            originalText: nil  // reply-assist:
         )
     }
 
@@ -77,7 +82,8 @@ extension MailDraft {
             draftId: nil,
             inReplyTo: message.rfcMessageID,
             references: referencesChain(for: message),
-            replyingToMessageID: message.id
+            replyingToMessageID: message.id,
+            originalText: message.plainTextBody  // reply-assist:
         )
     }
 
