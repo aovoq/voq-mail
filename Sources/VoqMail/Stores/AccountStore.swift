@@ -110,15 +110,24 @@ final class AccountStore: GmailRequestAuthorizing {
             // confirms each credential and corrects the display address.
             for email in emails { upsert(Account(email: email, displayName: nil)) }
             for email in emails {
+                // The provisional upsert above makes the account removable before its
+                // refresh/profile fetch finishes. If the user removed it during a prior
+                // iteration's await, skip it — re-upserting would resurrect an account
+                // whose Keychain item and caches were just purged (issue #8/#12).
+                guard accounts.contains(where: { $0.id == email }) else { continue }
                 do {
                     let token = try await accessToken(for: email)
                     let address = try await profiles.emailAddress(accessToken: token)
+                    // Re-check after the awaits: removal may have happened during them.
+                    guard accounts.contains(where: { $0.id == email }) else { continue }
                     upsert(Account(email: address, displayName: nil))
                 } catch let error as OAuthError where error.requiresReauthentication {
                     // The saved credential lapsed (Testing-mode 7-day expiry, revoked,
                     // or missing). Keep the account visible and flagged — `accessToken`
                     // already added it to `accountsNeedingReauth` — so the UI prompts a
-                    // re-login instead of the account silently vanishing (issue #11).
+                    // re-login instead of the account silently vanishing (issue #11) —
+                    // unless it was removed mid-restore, in which case stay removed.
+                    guard accounts.contains(where: { $0.id == email }) else { continue }
                     upsert(Account(email: email, displayName: nil))
                 } catch {
                     lastError = String(describing: error)
@@ -157,7 +166,12 @@ final class AccountStore: GmailRequestAuthorizing {
         do {
             return try await tokenProvider.accessToken(for: email)
         } catch let error as OAuthError where error.requiresReauthentication {
-            accountsNeedingReauth.insert(email)
+            // Don't flag an account that is no longer signed in — e.g. one removed
+            // during a launch restore that was still awaiting its token — or the flag
+            // would orphan a row that no longer exists (issue #8).
+            if accounts.contains(where: { $0.id == email }) {
+                accountsNeedingReauth.insert(email)
+            }
             throw error
         }
     }

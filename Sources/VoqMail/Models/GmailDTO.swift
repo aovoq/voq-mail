@@ -30,10 +30,6 @@ struct GmailMessage: Decodable {
     let snippet: String?
     /// Milliseconds since the epoch, as a string (Gmail's internal receipt time).
     let internalDate: String?
-    /// The account `historyId` as of the last change to this message. Returned in
-    /// every format; the max across a freshly-listed page seeds the incremental-sync
-    /// checkpoint (issue #13) without a separate `getProfile` round trip.
-    let historyId: String?
     let payload: Payload?
 
     struct Payload: Decodable {

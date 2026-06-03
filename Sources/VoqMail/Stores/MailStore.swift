@@ -193,8 +193,7 @@ final class MailStore {
                 s.isLoading = false
                 statesByAccount[accountID] = s
             }
-            await seedHistoryIdIfNeeded(
-                from: page.messages, accountID: accountID, authorizer: authorizer)
+            await seedHistoryIdIfNeeded(accountID: accountID, authorizer: authorizer)
         } catch {
             // A cancellation is the expected outcome of switching mailboxes mid-load;
             // a lapsed token is already surfaced by the re-auth banner (issue #11).
@@ -321,12 +320,21 @@ final class MailStore {
     /// the diff (new / deleted / relabelled messages) to the cache and — when this
     /// account is the active one — to the visible list, so new mail appears without
     /// a restart. A 404 (checkpoint older than Gmail's history retention) falls back
-    /// to a full re-sync. A no-op until the checkpoint is seeded by the first `load`.
+    /// to a full re-sync. When no checkpoint exists yet it re-establishes one by
+    /// reloading the active mailbox, so a failed earlier reseed self-heals on a later poll.
     func historySync(accountID: String, authorizer: any GmailRequestAuthorizing) async {
-        guard let cache, let startHistoryId = cache.lastHistoryId(accountID: accountID),
-              !syncingAccounts.contains(accountID) else { return }
+        guard let cache, !syncingAccounts.contains(accountID) else { return }
         syncingAccounts.insert(accountID)
         defer { syncingAccounts.remove(accountID) }
+        // No checkpoint yet — never seeded, or a full re-sync after a 404 failed before
+        // it could reseed. Re-establish it by reloading the active mailbox (which seeds
+        // on success); a still-failing reload leaves it nil to retry on the next poll,
+        // rather than the early-return stalling sync for this account forever. A no-op
+        // for non-active accounts, which reseed when the user next opens them.
+        guard let startHistoryId = cache.lastHistoryId(accountID: accountID) else {
+            await reloadActive(accountID: accountID, authorizer: authorizer)
+            return
+        }
         let generation = state(for: accountID).loadGeneration
         // Captured so a removal during any await below aborts the durable writes — a
         // signed-out account must not have its cache/checkpoint re-created (issue #8).
@@ -474,19 +482,18 @@ final class MailStore {
     }
 
     /// Seeds the incremental-sync checkpoint after a full load, only if none is set yet
-    /// — `historySync` owns advancing it from there. The max `historyId` over the
-    /// fetched page is gap-free: any change newer than the snapshot carries a higher id
-    /// and so is returned by the next `history.list`. When the page is empty (no message
-    /// carries a historyId), fall back to the account-level id from `users.getProfile`,
-    /// else an account whose first-opened mailbox is empty would never start polling.
+    /// — `historySync` owns advancing it from there. Seeds from the account-level
+    /// `historyId` (`users.getProfile`), NOT from a message's historyId: a low-traffic
+    /// mailbox's newest message can carry an id that already predates Gmail's history
+    /// retention even though the account has newer changes elsewhere, which would make
+    /// the very next `history.list` 404 and loop full reloads forever. getProfile always
+    /// returns a currently-valid id (and covers an empty mailbox, which has no message id
+    /// to seed from at all). The narrow window between the list and this call is
+    /// re-applied idempotently on the next diff, or recovered by a full reload.
     private func seedHistoryIdIfNeeded(
-        from messages: [GmailMessage], accountID: String, authorizer: any GmailRequestAuthorizing
+        accountID: String, authorizer: any GmailRequestAuthorizing
     ) async {
         guard let cache, cache.lastHistoryId(accountID: accountID) == nil else { return }
-        if let maxHistoryId = messages.compactMap({ $0.historyId.flatMap(UInt64.init) }).max() {
-            cache.setLastHistoryId(String(maxHistoryId), accountID: accountID)
-            return
-        }
         let purgeGen = purgeGenerations[accountID] ?? 0
         let fetched = try? await authorizer.performGmailRequest(for: accountID) { accessToken in
             try await self.client.profileHistoryId(accessToken: accessToken)
