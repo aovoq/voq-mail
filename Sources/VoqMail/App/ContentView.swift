@@ -66,9 +66,15 @@ struct ContentView: View {
     /// Drives incremental sync (issue #13): poll every signed-in account's
     /// `history.list` on a fixed cadence, and immediately whenever the app regains
     /// focus. Accounts behind the re-auth banner are skipped so a lapsed credential
-    /// doesn't burn polls. The pollers are fire-and-forget on the root view, which
-    /// lives for the app's lifetime.
+    /// doesn't burn polls.
+    ///
+    /// The pollers are unstructured Tasks that outlive this view, so they are latched
+    /// to start exactly once (`beginPolling`): `ContentView.task` can re-run — a second
+    /// window or a re-created root view — and without the latch each recreation would
+    /// stack another duplicate set of `history.list` loops that closing the window
+    /// would not stop.
     private func startIncrementalSync() {
+        guard mailStore.beginPolling() else { return }
         @Sendable @MainActor func syncAll() async {
             for account in accountStore.accounts where !accountStore.needsReauthentication(account.id) {
                 await mailStore.historySync(accountID: account.id, authorizer: accountStore)

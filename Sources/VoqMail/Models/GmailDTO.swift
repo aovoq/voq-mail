@@ -77,6 +77,14 @@ struct GmailLabelList: Decodable {
     let labels: [GmailLabel]?
 }
 
+/// `users.getProfile` response, reduced to the account-level `historyId` (issue #13).
+/// Used to seed the sync checkpoint when the first loaded mailbox is empty and so
+/// carries no message-level historyId to seed from. (The address is read elsewhere
+/// by `GmailProfileService`; this slice only needs the checkpoint.)
+struct GmailProfile: Decodable {
+    let historyId: String?
+}
+
 /// `users.history.list` response (issue #13). Carries the diff records since the
 /// requested `startHistoryId`, the newest `historyId` (the next checkpoint), and a
 /// `nextPageToken` when the diff spans multiple pages.

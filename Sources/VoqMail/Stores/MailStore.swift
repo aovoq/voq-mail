@@ -53,6 +53,32 @@ final class MailStore {
     /// (issue #13) firing together don't run the same diff twice.
     private var syncingAccounts: Set<String> = []
 
+    /// Per-account removal counter, bumped by `purge`. A load/sync suspended at an
+    /// await captures it and re-checks before any durable cache/checkpoint write, so
+    /// an account removed mid-flight can't have its data re-persisted after sign-out
+    /// (issue #8/#12). Distinct from `loadGeneration`, which lives inside the
+    /// per-account state `purge` discards — this survives the purge.
+    private var purgeGenerations: [String: Int] = [:]
+
+    /// One-time latch so the background pollers (issue #13) start exactly once for the
+    /// app's lifetime: `ContentView.task` can re-run (a second window, a re-created
+    /// root view), and its pollers are unstructured Tasks that outlive the view, so
+    /// without this every recreation would stack another duplicate set.
+    private var pollingStarted = false
+
+    /// Trips the polling latch. Returns true only on the first call, so the caller
+    /// starts the pollers just once.
+    func beginPolling() -> Bool {
+        guard !pollingStarted else { return false }
+        pollingStarted = true
+        return true
+    }
+
+    /// Whether `accountID` was purged (signed out) since `purgeGen` was captured.
+    private func wasPurged(_ accountID: String, since purgeGen: Int) -> Bool {
+        (purgeGenerations[accountID] ?? 0) != purgeGen
+    }
+
     /// Binds the store to the app's persistent cache. Called once at composition
     /// (ContentView) before any account restore, so the first load can paint from disk.
     func attach(context: ModelContext) {
@@ -84,6 +110,7 @@ final class MailStore {
     /// clears its cached messages and sync checkpoint so a removed account leaves
     /// nothing on disk to resurrect (issue #8 / #12).
     func purge(accountID: String) {
+        purgeGenerations[accountID, default: 0] &+= 1
         statesByAccount[accountID] = nil
         if activeAccountID == accountID { activeAccountID = nil }
         cache?.deleteAllMessages(accountID: accountID)
@@ -102,6 +129,11 @@ final class MailStore {
         var s = state(for: accountID)
         s.loadGeneration &+= 1
         let generation = s.loadGeneration
+        // Captured alongside the generation: `loadGeneration` lives inside the state
+        // `purge` discards, so a remove+re-add resets it and a stale in-flight load
+        // could match the re-added account's fresh generation. `purgeGen` survives the
+        // purge, so the durable writes below also gate on it (issue #8).
+        let purgeGen = purgeGenerations[accountID] ?? 0
         s.isLoading = true
         s.errorMessage = nil
         if s.loaded?.id != mailbox.id {
@@ -141,7 +173,8 @@ final class MailStore {
                     labelID: mailbox.gmailLabelID, maxResults: Self.pageSize,
                     pageToken: nil, concurrency: 5, accessToken: accessToken)
             }
-            guard statesByAccount[accountID]?.loadGeneration == generation else { return }
+            guard statesByAccount[accountID]?.loadGeneration == generation,
+                  !wasPurged(accountID, since: purgeGen) else { return }
             let fresh = page.messages
                 .map { MailMessage(gmail: $0, accountID: accountID, mailboxID: mailbox.id) }
                 .sorted { $0.receivedAt > $1.receivedAt }
@@ -153,7 +186,15 @@ final class MailStore {
             // (issue #13) from the freshest message's historyId, only if none is set
             // yet — once seeded, `historySync` owns advancing it.
             cache?.upsert(fresh)
-            seedHistoryIdIfNeeded(from: page.messages, accountID: accountID)
+            // Release the loading state before the seed: an empty mailbox seeds the
+            // checkpoint from getProfile (an extra await), and it should show its empty
+            // state immediately rather than holding a spinner through that fetch.
+            if var s = statesByAccount[accountID], s.loadGeneration == generation {
+                s.isLoading = false
+                statesByAccount[accountID] = s
+            }
+            await seedHistoryIdIfNeeded(
+                from: page.messages, accountID: accountID, authorizer: authorizer)
         } catch {
             // A cancellation is the expected outcome of switching mailboxes mid-load;
             // a lapsed token is already surfaced by the re-auth banner (issue #11).
@@ -186,6 +227,7 @@ final class MailStore {
               let mailbox = s.loaded,
               let pageToken = s.nextPageToken else { return }
         let generation = s.loadGeneration
+        let purgeGen = purgeGenerations[accountID] ?? 0
         s.isLoadingMore = true
         s.errorMessage = nil
         statesByAccount[accountID] = s
@@ -202,8 +244,10 @@ final class MailStore {
                     labelID: mailbox.gmailLabelID, maxResults: Self.pageSize,
                     pageToken: pageToken, concurrency: 5, accessToken: accessToken)
             }
-            // A mailbox switch since this page was requested invalidates the append.
-            guard statesByAccount[accountID]?.loadGeneration == generation else { return }
+            // A mailbox switch (or an account removal that resets the generation) since
+            // this page was requested invalidates the append and its cache write.
+            guard statesByAccount[accountID]?.loadGeneration == generation,
+                  !wasPurged(accountID, since: purgeGen) else { return }
             var s = state(for: accountID)
             let existing = Set(s.messages.map(\.id))
             let added = page.messages
@@ -284,22 +328,29 @@ final class MailStore {
         syncingAccounts.insert(accountID)
         defer { syncingAccounts.remove(accountID) }
         let generation = state(for: accountID).loadGeneration
+        // Captured so a removal during any await below aborts the durable writes — a
+        // signed-out account must not have its cache/checkpoint re-created (issue #8).
+        let purgeGen = purgeGenerations[accountID] ?? 0
 
         do {
             let (records, newHistoryId) = try await authorizer.performGmailRequest(for: accountID) { accessToken in
                 try await self.fetchHistory(startHistoryId: startHistoryId, accessToken: accessToken)
             }
+            guard !wasPurged(accountID, since: purgeGen) else { return }
             guard !records.isEmpty else {
                 if let newHistoryId { cache.setLastHistoryId(newHistoryId, accountID: accountID) }
                 return
             }
             try await applyHistory(
-                records, accountID: accountID, generation: generation, authorizer: authorizer)
+                records, accountID: accountID, generation: generation,
+                purgeGen: purgeGen, authorizer: authorizer)
+            guard !wasPurged(accountID, since: purgeGen) else { return }
             cache.setLastHistoryId(newHistoryId ?? startHistoryId, accountID: accountID)
         } catch let error as GmailError where error.isHistoryGone {
             // The checkpoint is older than Gmail's ~1-week history retention. Clear it
             // and full-resync the visible mailbox; non-active accounts re-sync the next
             // time the user opens them (their `load` reseeds the checkpoint).
+            guard !wasPurged(accountID, since: purgeGen) else { return }
             cache.setLastHistoryId(nil, accountID: accountID)
             await reloadActive(accountID: accountID, authorizer: authorizer)
         } catch {
@@ -332,7 +383,7 @@ final class MailStore {
     /// only for messages not already cached; existing rows are just relabelled.
     private func applyHistory(
         _ records: [GmailHistory], accountID: String, generation: Int,
-        authorizer: any GmailRequestAuthorizing
+        purgeGen: Int, authorizer: any GmailRequestAuthorizing
     ) async throws {
         guard let cache else { return }
 
@@ -369,6 +420,12 @@ final class MailStore {
             }
             hydrated = Dictionary(fetched.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         }
+
+        // If the account was removed while hydrating, abort before any durable write —
+        // `purge` already deleted its cache, and re-inserting here would resurrect a
+        // signed-out account's message metadata on disk (issue #8). Everything from
+        // here to the in-memory write runs without an await, so one check suffices.
+        guard !wasPurged(accountID, since: purgeGen) else { return }
 
         // Authoritative final labels per surviving id: a freshly-fetched message's
         // labels are more current than the history snapshot, so they win. Built as a
@@ -416,15 +473,30 @@ final class MailStore {
         statesByAccount[accountID] = s
     }
 
-    /// Seeds the incremental-sync checkpoint from the freshest message's `historyId`
-    /// after a full load, but only if none is set yet — `historySync` owns advancing
-    /// it from there. Using the max over the fetched page guarantees no gap: any
-    /// change newer than the snapshot carries a higher id and so is returned by the
-    /// next `history.list`.
-    private func seedHistoryIdIfNeeded(from messages: [GmailMessage], accountID: String) {
+    /// Seeds the incremental-sync checkpoint after a full load, only if none is set yet
+    /// — `historySync` owns advancing it from there. The max `historyId` over the
+    /// fetched page is gap-free: any change newer than the snapshot carries a higher id
+    /// and so is returned by the next `history.list`. When the page is empty (no message
+    /// carries a historyId), fall back to the account-level id from `users.getProfile`,
+    /// else an account whose first-opened mailbox is empty would never start polling.
+    private func seedHistoryIdIfNeeded(
+        from messages: [GmailMessage], accountID: String, authorizer: any GmailRequestAuthorizing
+    ) async {
         guard let cache, cache.lastHistoryId(accountID: accountID) == nil else { return }
-        guard let maxHistoryId = messages.compactMap({ $0.historyId.flatMap(UInt64.init) }).max() else { return }
-        cache.setLastHistoryId(String(maxHistoryId), accountID: accountID)
+        if let maxHistoryId = messages.compactMap({ $0.historyId.flatMap(UInt64.init) }).max() {
+            cache.setLastHistoryId(String(maxHistoryId), accountID: accountID)
+            return
+        }
+        let purgeGen = purgeGenerations[accountID] ?? 0
+        let fetched = try? await authorizer.performGmailRequest(for: accountID) { accessToken in
+            try await self.client.profileHistoryId(accessToken: accessToken)
+        }
+        // The account may have been removed during the profile fetch; don't re-create a
+        // checkpoint for it, and don't clobber a checkpoint a concurrent path just set.
+        guard let historyId = fetched ?? nil,
+              !wasPurged(accountID, since: purgeGen),
+              cache.lastHistoryId(accountID: accountID) == nil else { return }
+        cache.setLastHistoryId(historyId, accountID: accountID)
     }
 }
 

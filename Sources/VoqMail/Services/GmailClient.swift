@@ -133,6 +133,13 @@ struct GmailClient {
         let size: Int?
     }
 
+    /// The account-level `historyId` from `users.getProfile` (issue #13). Used to seed
+    /// the sync checkpoint when a full load returned no messages to seed from.
+    func profileHistoryId(accessToken: String) async throws -> String? {
+        let data = try await get(URL(string: "\(Self.usersBase)/profile")!, accessToken: accessToken)
+        return try JSONDecoder().decode(GmailProfile.self, from: data).historyId
+    }
+
     /// One page of `users.history.list` from a checkpoint (issue #13). Scoped to the
     /// four change kinds incremental sync applies. A `startHistoryId` older than
     /// Gmail's retention (~a week) yields a 404, surfaced as
