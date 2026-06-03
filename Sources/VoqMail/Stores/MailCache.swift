@@ -87,6 +87,16 @@ struct MailCache {
         return ((try? context.fetch(descriptor))?.isEmpty == false)
     }
 
+    /// The cached Gmail labels for one message, or `nil` when the message is not
+    /// cached. Used to apply Gmail history label deltas when the history message
+    /// omits its full label set.
+    func labelIds(accountID: String, gmailID: String) -> [String]? {
+        let key = CachedMessage.cacheID(accountID: accountID, gmailID: gmailID)
+        var descriptor = FetchDescriptor<CachedMessage>(predicate: #Predicate { $0.cacheID == key })
+        descriptor.fetchLimit = 1
+        return (try? context.fetch(descriptor).first)?.labelIds
+    }
+
     /// Replaces the stored label set of one message (a history label add/remove).
     /// A no-op if the message isn't cached.
     func setLabels(accountID: String, gmailID: String, labelIds: [String]) {

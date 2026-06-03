@@ -53,6 +53,11 @@ final class MailStore {
     /// (issue #13) firing together don't run the same diff twice.
     private var syncingAccounts: Set<String> = []
 
+    /// Per-account marker for history paths that have already changed cache/list
+    /// state. A full load captures this before `messages.list` and drops its stale
+    /// page if a history diff or checkpoint-expiry invalidation landed first.
+    private var historyMutationGenerations: [String: Int] = [:]
+
     /// Per-account removal counter, bumped by `purge`. A load/sync suspended at an
     /// await captures it and re-checks before any durable cache/checkpoint write, so
     /// an account removed mid-flight can't have its data re-persisted after sign-out
@@ -112,6 +117,7 @@ final class MailStore {
     func purge(accountID: String) {
         purgeGenerations[accountID, default: 0] &+= 1
         statesByAccount[accountID] = nil
+        historyMutationGenerations[accountID] = nil
         if activeAccountID == accountID { activeAccountID = nil }
         cache?.deleteAllMessages(accountID: accountID)
         cache?.deleteSyncState(accountID: accountID)
@@ -167,6 +173,12 @@ final class MailStore {
             }
         }
 
+        let initialHistoryId = await initialHistoryIdForFullLoadIfNeeded(
+            accountID: accountID, authorizer: authorizer)
+        guard statesByAccount[accountID]?.loadGeneration == generation,
+              !wasPurged(accountID, since: purgeGen) else { return }
+        let historyMutationGeneration = historyMutationGenerations[accountID] ?? 0
+
         do {
             let page = try await authorizer.performGmailRequest(for: accountID) { accessToken in
                 try await self.client.messages(
@@ -175,6 +187,12 @@ final class MailStore {
             }
             guard statesByAccount[accountID]?.loadGeneration == generation,
                   !wasPurged(accountID, since: purgeGen) else { return }
+            if (historyMutationGenerations[accountID] ?? 0) != historyMutationGeneration {
+                // A history diff landed first; re-fetch instead of overwriting it
+                // with the older page this request saw.
+                await load(mailbox: mailbox, authorizer: authorizer)
+                return
+            }
             let fresh = page.messages
                 .map { MailMessage(gmail: $0, accountID: accountID, mailboxID: mailbox.id) }
                 .sorted { $0.receivedAt > $1.receivedAt }
@@ -183,17 +201,15 @@ final class MailStore {
             s.nextPageToken = page.nextPageToken
             statesByAccount[accountID] = s
             // Write through to the cache and seed the incremental-sync checkpoint
-            // (issue #13) from the freshest message's historyId, only if none is set
-            // yet — once seeded, `historySync` owns advancing it.
+            // from the account history id captured before this full load. Any change
+            // racing with the load is therefore after the checkpoint and will be
+            // replayed by `historySync`; once seeded, history sync owns advancing it.
             cache?.upsert(fresh)
-            // Release the loading state before the seed: an empty mailbox seeds the
-            // checkpoint from getProfile (an extra await), and it should show its empty
-            // state immediately rather than holding a spinner through that fetch.
+            seedHistoryIdIfNeeded(initialHistoryId, accountID: accountID, purgeGen: purgeGen)
             if var s = statesByAccount[accountID], s.loadGeneration == generation {
                 s.isLoading = false
                 statesByAccount[accountID] = s
             }
-            await seedHistoryIdIfNeeded(accountID: accountID, authorizer: authorizer)
         } catch {
             // A cancellation is the expected outcome of switching mailboxes mid-load;
             // a lapsed token is already surfaced by the re-auth banner (issue #11).
@@ -353,6 +369,7 @@ final class MailStore {
                 records, accountID: accountID, generation: generation,
                 purgeGen: purgeGen, authorizer: authorizer)
             guard !wasPurged(accountID, since: purgeGen) else { return }
+            historyMutationGenerations[accountID, default: 0] &+= 1
             cache.setLastHistoryId(newHistoryId ?? startHistoryId, accountID: accountID)
         } catch let error as GmailError where error.isHistoryGone {
             // The checkpoint is older than Gmail's ~1-week history retention. Clear it
@@ -360,6 +377,7 @@ final class MailStore {
             // time the user opens them (their `load` reseeds the checkpoint).
             guard !wasPurged(accountID, since: purgeGen) else { return }
             cache.setLastHistoryId(nil, accountID: accountID)
+            discardUntrustedCachedMessages(accountID: accountID)
             await reloadActive(accountID: accountID, authorizer: authorizer)
         } catch {
             // Cancellation, a lapsed credential (owned by the re-auth banner, issue
@@ -407,10 +425,19 @@ final class MailStore {
                 deleted.remove(change.message.id)
                 currentLabels[change.message.id] = change.message.labelIds ?? []
             }
-            for change in (record.labelsAdded ?? []) + (record.labelsRemoved ?? []) {
+            for change in record.labelsAdded ?? [] {
                 guard !deleted.contains(change.message.id) else { continue }
-                currentLabels[change.message.id] =
-                    change.message.labelIds ?? currentLabels[change.message.id] ?? []
+                let id = change.message.id
+                currentLabels[id] = change.message.labelIds
+                    ?? labelsAfterAdding(change.labelIds ?? [], to: labelsForHistoryDelta(
+                        id: id, currentLabels: currentLabels, accountID: accountID, cache: cache))
+            }
+            for change in record.labelsRemoved ?? [] {
+                guard !deleted.contains(change.message.id) else { continue }
+                let id = change.message.id
+                currentLabels[id] = change.message.labelIds
+                    ?? labelsAfterRemoving(change.labelIds ?? [], from: labelsForHistoryDelta(
+                        id: id, currentLabels: currentLabels, accountID: accountID, cache: cache))
             }
         }
 
@@ -481,30 +508,63 @@ final class MailStore {
         statesByAccount[accountID] = s
     }
 
-    /// Seeds the incremental-sync checkpoint after a full load, only if none is set yet
-    /// — `historySync` owns advancing it from there. Seeds from the account-level
-    /// `historyId` (`users.getProfile`), NOT from a message's historyId: a low-traffic
-    /// mailbox's newest message can carry an id that already predates Gmail's history
-    /// retention even though the account has newer changes elsewhere, which would make
-    /// the very next `history.list` 404 and loop full reloads forever. getProfile always
-    /// returns a currently-valid id (and covers an empty mailbox, which has no message id
-    /// to seed from at all). The narrow window between the list and this call is
-    /// re-applied idempotently on the next diff, or recovered by a full reload.
-    private func seedHistoryIdIfNeeded(
+    /// Captures the incremental-sync checkpoint before a full load, only if none is
+    /// set yet. The load stores this older account-level `historyId` only after it
+    /// succeeds, so changes racing with the load are replayed idempotently by the
+    /// next `historySync` instead of being skipped by a post-load `getProfile`.
+    private func initialHistoryIdForFullLoadIfNeeded(
         accountID: String, authorizer: any GmailRequestAuthorizing
-    ) async {
-        guard let cache, cache.lastHistoryId(accountID: accountID) == nil else { return }
-        let purgeGen = purgeGenerations[accountID] ?? 0
-        let fetched = try? await authorizer.performGmailRequest(for: accountID) { accessToken in
+    ) async -> String? {
+        guard let cache, cache.lastHistoryId(accountID: accountID) == nil else { return nil }
+        return try? await authorizer.performGmailRequest(for: accountID) { accessToken in
             try await self.client.profileHistoryId(accessToken: accessToken)
         }
-        // The account may have been removed during the profile fetch; don't re-create a
-        // checkpoint for it, and don't clobber a checkpoint a concurrent path just set.
-        guard let historyId = fetched ?? nil,
+    }
+
+    /// Stores the pre-load checkpoint after a successful full load. It still guards
+    /// against account removal and a concurrent path seeding first.
+    private func seedHistoryIdIfNeeded(_ historyId: String?, accountID: String, purgeGen: Int) {
+        guard let cache, let historyId,
               !wasPurged(accountID, since: purgeGen),
               cache.lastHistoryId(accountID: accountID) == nil else { return }
         cache.setLastHistoryId(historyId, accountID: accountID)
     }
+
+    /// A history-404 means the cache missed an unknown interval of deletes and
+    /// label moves. Drop account-wide message state and invalidate in-flight loads
+    /// before a full reload reseeds a trustworthy checkpoint.
+    private func discardUntrustedCachedMessages(accountID: String) {
+        cache?.deleteAllMessages(accountID: accountID)
+        historyMutationGenerations[accountID, default: 0] &+= 1
+        guard var s = statesByAccount[accountID] else { return }
+        s.loadGeneration &+= 1
+        s.messages = []
+        s.nextPageToken = nil
+        s.isLoading = false
+        s.isLoadingMore = false
+        statesByAccount[accountID] = s
+    }
+}
+
+@MainActor
+private func labelsForHistoryDelta(
+    id: String, currentLabels: [String: [String]], accountID: String, cache: MailCache
+) -> [String] {
+    currentLabels[id] ?? cache.labelIds(accountID: accountID, gmailID: id) ?? []
+}
+
+private func labelsAfterAdding(_ added: [String], to labels: [String]) -> [String] {
+    var result = labels
+    var existing = Set(labels)
+    for label in added where existing.insert(label).inserted {
+        result.append(label)
+    }
+    return result
+}
+
+private func labelsAfterRemoving(_ removed: [String], from labels: [String]) -> [String] {
+    let removed = Set(removed)
+    return labels.filter { !removed.contains($0) }
 }
 
 /// Whether an error is a cancellation — expected when a mailbox/message switch

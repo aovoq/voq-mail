@@ -90,9 +90,9 @@ struct GmailHistoryList: Decodable {
     let nextPageToken: String?
 }
 
-/// One history record. Each change kind carries the affected message resource
-/// (id/threadId plus its current `labelIds`), which is enough to route the change
-/// to the right cached mailbox; label changes also list the labels that moved.
+/// One history record. Each change kind carries the affected message resource.
+/// Label changes can omit the message's full `labelIds`; in that case their own
+/// `labelIds` are the labels that moved and must be applied as a delta.
 struct GmailHistory: Decodable {
     let id: String
     let messagesAdded: [MessageChange]?
