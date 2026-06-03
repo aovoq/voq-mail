@@ -25,4 +25,21 @@ enum OAuthError: Error {
     case profileFetchFailed(status: Int)
     /// No refresh token is available for the account (none issued, or none stored).
     case noRefreshToken
+    /// A refresh token was rejected as expired or revoked (`invalid_grant`). The
+    /// trigger for the graceful re-authentication flow (issue #11) — distinct from
+    /// `tokenRequestFailed` so a transient 5xx is never mistaken for a dead token.
+    case refreshTokenExpired
+}
+
+extension OAuthError {
+    /// Whether this failure means the account must be re-signed-in: its stored
+    /// credential is gone or has been rejected. Such errors are owned by the
+    /// re-auth banner (issue #11) — callers flag the account and suppress the raw
+    /// error rather than retrying it or painting it over the mail UI.
+    var requiresReauthentication: Bool {
+        switch self {
+        case .refreshTokenExpired, .noRefreshToken: return true
+        default: return false
+        }
+    }
 }

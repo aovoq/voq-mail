@@ -20,6 +20,10 @@ final class AccountStore {
     private(set) var isAuthenticating = false
     /// Last failure worth showing, or nil. User-cancellation is not recorded.
     var lastError: String?
+    /// Accounts whose refresh token was rejected (expired or revoked). They stay in
+    /// `accounts` so the UI keeps showing them, but flagged so a re-login banner
+    /// appears and their failed loads aren't silent (issue #11).
+    private(set) var accountsNeedingReauth: Set<String> = []
 
     private let tokenProvider = TokenProvider()
     private let keychain = KeychainTokenStore()
@@ -30,37 +34,75 @@ final class AccountStore {
     /// composition (ContentView) so this store can drive the per-account store
     /// slices' cleanup without depending on those stores itself (issue #8).
     var onAccountRemoved: ((String) -> Void)?
+    /// Per-account hook, run after a lapsed account is re-authenticated, so the
+    /// stores that errored out on the dead token can reload. Wired in ContentView
+    /// alongside `onAccountRemoved`, for the same reason (issue #11).
+    var onAccountReauthenticated: ((String) -> Void)?
 
-    /// Launches the OAuth consent flow and adds the resulting account.
-    func addAccount() async {
-        guard !isAuthenticating else { return }
+    /// Launches the OAuth consent flow and adds the resulting account, returning the
+    /// signed-in address (nil if cancelled or failed). `loginHint` pre-selects an
+    /// address on the consent screen — passed by `reauthenticate` so re-signing a
+    /// lapsed account targets the right one.
+    @discardableResult
+    func addAccount(loginHint: String? = nil) async -> String? {
+        guard !isAuthenticating else { return nil }
         isAuthenticating = true
         lastError = nil
         defer { isAuthenticating = false }
 
         do {
             let authenticator = AccountAuthenticator(webAuth: webAuth)
-            let (account, tokens) = try await authenticator.signIn()
+            let (account, tokens) = try await authenticator.signIn(loginHint: loginHint)
             await tokenProvider.store(tokens, for: account.email)
             upsert(account)
+            // A fresh token clears any re-auth flag; if this *was* a re-auth, let the
+            // stores that errored on the dead token reload (issue #11).
+            if accountsNeedingReauth.remove(account.email) != nil {
+                onAccountReauthenticated?(account.email)
+            }
+            return account.email
         } catch OAuthError.userCancelled {
             // Sheet dismissed — nothing to report.
+            return nil
         } catch {
             lastError = String(describing: error)
+            return nil
         }
+    }
+
+    /// Re-runs the consent flow for a lapsed account, pinned to its address. Reuses
+    /// `addAccount`: signing back into the same id refreshes its Keychain item,
+    /// clears the re-auth flag, and triggers a reload. `login_hint` is only a hint,
+    /// so if the user picks a different account the lapsed one stays flagged — say
+    /// so rather than leaving its banner row silently unchanged (issue #11).
+    func reauthenticate(_ email: String) async {
+        let signedInAs = await addAccount(loginHint: email)
+        if let signedInAs, signedInAs != email {
+            lastError = "Signed in as \(signedInAs); \(email) still needs re-authentication."
+        }
+    }
+
+    /// Whether `email` is flagged for re-authentication (its refresh token lapsed).
+    func needsReauthentication(_ email: String) -> Bool {
+        accountsNeedingReauth.contains(email)
     }
 
     /// Restores accounts saved in the Keychain: refresh each token and fetch its
     /// address so the app shows signed-in state without a re-login. A single
-    /// account that fails to restore does not block the others; surfacing a
-    /// re-auth prompt for it is issue #11.
+    /// account that fails to restore does not block the others.
     func restoreAccounts() async {
         do {
             for email in try keychain.storedAccountEmails() {
                 do {
-                    let token = try await tokenProvider.accessToken(for: email)
+                    let token = try await accessToken(for: email)
                     let address = try await profiles.emailAddress(accessToken: token)
                     upsert(Account(email: address, displayName: nil))
+                } catch let error as OAuthError where error.requiresReauthentication {
+                    // The saved credential lapsed (Testing-mode 7-day expiry, revoked,
+                    // or missing). Keep the account visible and flagged — `accessToken`
+                    // already added it to `accountsNeedingReauth` — so the UI prompts a
+                    // re-login instead of the account silently vanishing (issue #11).
+                    upsert(Account(email: email, displayName: nil))
                 } catch {
                     lastError = String(describing: error)
                 }
@@ -84,12 +126,27 @@ final class AccountStore {
         }
         await tokenProvider.clearCache(for: id)
         accounts.removeAll { $0.id == id }
+        // Drop any re-auth flag too, else the banner would keep prompting for an
+        // account that no longer exists and its button would re-add it (issue #11).
+        accountsNeedingReauth.remove(id)
         onAccountRemoved?(id)
     }
 
-    /// A valid access token for an account, for use by Gmail API calls (#4+).
+    /// A valid access token for an account, for use by Gmail API calls (#4+). This
+    /// is the single point every token refresh passes through, so a refresh that
+    /// finds the stored credential dead (expired/revoked/missing) flags the account
+    /// here — no caller can swallow that silently (issue #11); a good token clears
+    /// the flag. (A still-valid *cached* access token that the server later rejects
+    /// with a 401 surfaces on the next refresh, once the cache lapses.)
     func accessToken(for email: String) async throws -> String {
-        try await tokenProvider.accessToken(for: email)
+        do {
+            let token = try await tokenProvider.accessToken(for: email)
+            if accountsNeedingReauth.contains(email) { accountsNeedingReauth.remove(email) }
+            return token
+        } catch let error as OAuthError where error.requiresReauthentication {
+            accountsNeedingReauth.insert(email)
+            throw error
+        }
     }
 
     private func upsert(_ account: Account) {

@@ -140,7 +140,12 @@ struct MainMailSplitView: View {
             Group {
                 switch navigation.detailRoute {
                 case .mailbox:
-                    MailboxDetail(mailbox: selectedMailbox)
+                    // Banner above the mailbox so a lapsed session is impossible to
+                    // miss (issue #11); Settings carries the same prompt per account.
+                    VStack(spacing: 0) {
+                        ReauthBanner()
+                        MailboxDetail(mailbox: selectedMailbox)
+                    }
                 case .settings:
                     SettingsView()
                 }

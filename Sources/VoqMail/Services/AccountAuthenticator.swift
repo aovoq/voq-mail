@@ -20,12 +20,14 @@ struct AccountAuthenticator {
     let webAuth: WebAuthenticationSession
 
     /// Drives the full flow. The returned tokens let the caller seed an access
-    /// token without an immediate refresh round-trip.
-    func signIn() async throws -> (account: Account, tokens: TokenResponse) {
+    /// token without an immediate refresh round-trip. `loginHint` pre-selects an
+    /// address on the consent screen, used when re-authenticating a known account
+    /// whose token lapsed (issue #11).
+    func signIn(loginHint: String? = nil) async throws -> (account: Account, tokens: TokenResponse) {
         let pkce = PKCE()
         let state = RandomString.urlSafe()
 
-        let authURL = oauth.authorizationURL(pkce: pkce, state: state)
+        let authURL = oauth.authorizationURL(pkce: pkce, state: state, loginHint: loginHint)
         let callbackURL = try await webAuth.authenticate(
             url: authURL, callbackScheme: OAuthConfiguration.redirectScheme)
 

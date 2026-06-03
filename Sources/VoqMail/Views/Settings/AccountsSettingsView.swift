@@ -71,10 +71,18 @@ struct AccountsSettingsView: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
 
-                statusBadge
+                statusBadge(for: account)
             }
 
             Spacer(minLength: 12)
+
+            // A lapsed account gets a re-login action right beside its badge so the
+            // fix is one click from where the problem is shown (issue #11).
+            if store.needsReauthentication(account.id) {
+                Button("Re-authenticate") { reauthenticate(account) }
+                    .buttonStyle(.borderless)
+                    .disabled(store.isAuthenticating)
+            }
 
             Button("Remove", role: .destructive) { remove(account) }
                 .buttonStyle(.borderless)
@@ -83,15 +91,23 @@ struct AccountsSettingsView: View {
         .padding(.vertical, 11)
     }
 
-    /// Connection state. For now every signed-in account reads as connected;
-    /// surfacing "needs re-authentication" on a failed token refresh is a later
-    /// slice that adds the detection in AccountStore.
-    private var statusBadge: some View {
+    /// Connection state: amber "needs re-authentication" once a token refresh has
+    /// been rejected (issue #11), green "connected" otherwise.
+    @ViewBuilder
+    private func statusBadge(for account: Account) -> some View {
+        if store.needsReauthentication(account.id) {
+            badge(color: .orange, text: "Needs re-authentication")
+        } else {
+            badge(color: .green, text: "Connected")
+        }
+    }
+
+    private func badge(color: Color, text: String) -> some View {
         HStack(spacing: 5) {
             Circle()
-                .fill(.green)
+                .fill(color)
                 .frame(width: 7, height: 7)
-            Text("Connected")
+            Text(text)
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -123,5 +139,10 @@ struct AccountsSettingsView: View {
     /// view no longer reaches into the other stores itself.
     private func remove(_ account: Account) {
         Task { await store.removeAccount(account.id) }
+    }
+
+    /// Re-runs the consent flow for a lapsed account, pinned to its address.
+    private func reauthenticate(_ account: Account) {
+        Task { await store.reauthenticate(account.id) }
     }
 }

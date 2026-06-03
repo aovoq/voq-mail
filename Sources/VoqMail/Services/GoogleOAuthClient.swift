@@ -21,7 +21,10 @@ struct GoogleOAuthClient {
     ///
     /// `access_type=offline` + `prompt=consent` make Google return a refresh
     /// token on every run, which the rest of the flow depends on (issue #3).
-    func authorizationURL(pkce: PKCE, state: String) -> URL {
+    /// `loginHint` pre-selects an address on the consent screen — passed when
+    /// re-authenticating a specific lapsed account so the user isn't asked which
+    /// one they meant (issue #11).
+    func authorizationURL(pkce: PKCE, state: String, loginHint: String? = nil) -> URL {
         var components = URLComponents(
             url: Self.authorizationEndpoint, resolvingAgainstBaseURL: false)!
         components.queryItems = [
@@ -35,6 +38,9 @@ struct GoogleOAuthClient {
             .init(name: "prompt", value: "consent"),
             .init(name: "state", value: state),
         ]
+        if let loginHint {
+            components.queryItems?.append(.init(name: "login_hint", value: loginHint))
+        }
         return components.url!
     }
 
@@ -49,13 +55,31 @@ struct GoogleOAuthClient {
         ])
     }
 
-    /// Trades a stored refresh token for a fresh access token.
+    /// Trades a stored refresh token for a fresh access token. A rejected token
+    /// (`invalid_grant`: expired or revoked) is mapped to the typed
+    /// `.refreshTokenExpired` so callers can drive re-auth rather than treating it
+    /// as a generic failure (issue #11).
     func refreshAccessToken(refreshToken: String) async throws -> TokenResponse {
-        try await postToken([
-            "grant_type": "refresh_token",
-            "refresh_token": refreshToken,
-            "client_id": OAuthConfiguration.clientID,
-        ])
+        do {
+            return try await postToken([
+                "grant_type": "refresh_token",
+                "refresh_token": refreshToken,
+                "client_id": OAuthConfiguration.clientID,
+            ])
+        } catch let OAuthError.tokenRequestFailed(_, body) where Self.isInvalidGrant(body) {
+            throw OAuthError.refreshTokenExpired
+        }
+    }
+
+    /// Whether a token-endpoint error body is Google's `invalid_grant` — the code
+    /// it returns for an expired or revoked refresh token.
+    private static func isInvalidGrant(_ body: String) -> Bool {
+        struct ErrorBody: Decodable { let error: String? }
+        guard let data = body.data(using: .utf8),
+              let decoded = try? JSONDecoder().decode(ErrorBody.self, from: data) else {
+            return false
+        }
+        return decoded.error == "invalid_grant"
     }
 
     private func postToken(_ fields: [String: String]) async throws -> TokenResponse {
