@@ -16,6 +16,7 @@ struct MailboxDetail: View {
     @Environment(AccountStore.self) private var accountStore
     @Environment(MessageContentStore.self) private var contentStore
     @Environment(SendStore.self) private var sendStore
+    @Environment(ReplyAssistStore.self) private var assistStore  // reply-assist:
     @State private var selectedMessageID: MailMessage.ID?
     @State private var activeDraft: MailDraft?
 
@@ -112,6 +113,7 @@ struct MailboxDetail: View {
         ComposerView(
             draft: draftBinding(for: draft.id),
             accounts: accountStore.accounts,
+            assist: assistStore,  // reply-assist:
             onCancel: {
                 sendStore.reset(accountID: accountID)
                 activeDraft = nil
