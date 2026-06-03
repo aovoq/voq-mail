@@ -46,12 +46,10 @@ struct ContentView: View {
                 // After a re-auth, reload the slices that errored on the dead token —
                 // sidebar labels and the open message list — so the account visibly
                 // returns to normal without a manual mailbox switch (issue #11).
-                accountStore.onAccountReauthenticated = { [labelStore, mailStore] id in
-                    let token: @Sendable () async throws -> String = {
-                        try await accountStore.accessToken(for: id)
-                    }
-                    labelStore.reload(accountID: id, token: token)
-                    Task { await mailStore.reloadActive(accountID: id, token: token) }
+                accountStore.onAccountReauthenticated = { [weak accountStore, labelStore, mailStore] id in
+                    guard let accountStore else { return }
+                    labelStore.reload(accountID: id, authorizer: accountStore)
+                    Task { await mailStore.reloadActive(accountID: id, authorizer: accountStore) }
                 }
                 await accountStore.restoreAccounts()
             }

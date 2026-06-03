@@ -44,10 +44,10 @@ final class LabelStore {
     /// completion (with its own retries) regardless of view lifecycle. A no-op if
     /// the labels are already loaded or a load is already in flight; call again
     /// after an error to retry.
-    func load(accountID: String, token: @escaping @Sendable () async throws -> String) {
+    func load(accountID: String, authorizer: any GmailRequestAuthorizing) {
         guard mailboxesByAccount[accountID] == nil, loadTasks[accountID] == nil else { return }
         loadTasks[accountID] = Task { [weak self] in
-            await self?.loadLabels(accountID: accountID, token: token)
+            await self?.loadLabels(accountID: accountID, authorizer: authorizer)
             self?.loadTasks[accountID] = nil
         }
     }
@@ -58,12 +58,12 @@ final class LabelStore {
     /// nil-ing them first would briefly drop the account from `allMailboxes` and
     /// bounce the user off the mailbox they were viewing. Cancels any in-flight load
     /// and bumps the generation so a stale result can't write back.
-    func reload(accountID: String, token: @escaping @Sendable () async throws -> String) {
+    func reload(accountID: String, authorizer: any GmailRequestAuthorizing) {
         loadTasks[accountID]?.cancel()
         loadingAccountIDs.remove(accountID)
         loadGenerationByAccount[accountID, default: 0] &+= 1
         loadTasks[accountID] = Task { [weak self] in
-            await self?.loadLabels(accountID: accountID, token: token)
+            await self?.loadLabels(accountID: accountID, authorizer: authorizer)
             self?.loadTasks[accountID] = nil
         }
     }
@@ -90,12 +90,13 @@ final class LabelStore {
         loadGenerationByAccount[accountID, default: 0] &+= 1
     }
 
-    /// Loads one account's labels and their unread counts. `token` supplies a
-    /// valid access token (it may refresh), so token failures surface here too.
+    /// Loads one account's labels and their unread counts. `authorizer` supplies a
+    /// valid access token, refreshes once after a Gmail 401, and flags re-auth if
+    /// the account credential is no longer accepted.
     /// Guarded per account so a concurrent reload of the same account is a no-op
     /// while different accounts still load in parallel. Private: callers go
     /// through `load`, which owns the Task so the load survives view re-renders.
-    private func loadLabels(accountID: String, token: @escaping @Sendable () async throws -> String) async {
+    private func loadLabels(accountID: String, authorizer: any GmailRequestAuthorizing) async {
         guard !loadingAccountIDs.contains(accountID) else { return }
         loadingAccountIDs.insert(accountID)
         errorsByAccount[accountID] = nil
@@ -106,22 +107,24 @@ final class LabelStore {
         // up; a lingering error then drives the sidebar's manual Retry button.
         for attempt in 1...Self.maxLoadAttempts {
             do {
-                let accessToken = try await token()
-                let all = try await client.labels(accessToken: accessToken)
-                let displayed = Self.displayedLabels(from: all)
-                // The list endpoint omits counts, so fetch them only for what we show.
-                let detailed = try await client.labels(
-                    ids: displayed.map(\.id), concurrency: 5, accessToken: accessToken)
-                // Use the thread (conversation) count so the badge matches Gmail's
-                // own UI, which counts unread conversations rather than messages.
-                let unreadByID = Dictionary(
-                    detailed.map { ($0.id, $0.threadsUnread ?? 0) },
-                    uniquingKeysWith: { first, _ in first })
+                let mailboxes = try await authorizer.performGmailRequest(for: accountID) { accessToken in
+                    let all = try await self.client.labels(accessToken: accessToken)
+                    let displayed = Self.displayedLabels(from: all)
+                    // The list endpoint omits counts, so fetch them only for what we show.
+                    let detailed = try await self.client.labels(
+                        ids: displayed.map(\.id), concurrency: 5, accessToken: accessToken)
+                    // Use the thread (conversation) count so the badge matches Gmail's
+                    // own UI, which counts unread conversations rather than messages.
+                    let unreadByID = Dictionary(
+                        detailed.map { ($0.id, $0.threadsUnread ?? 0) },
+                        uniquingKeysWith: { first, _ in first })
+                    return Self.mailboxes(
+                        from: displayed, unreadByID: unreadByID, accountID: accountID)
+                }
                 // The account may have been removed (and re-added) while we awaited;
                 // only write back if this load hasn't been superseded.
                 guard (loadGenerationByAccount[accountID] ?? 0) == generation else { return }
-                mailboxesByAccount[accountID] = Self.mailboxes(
-                    from: displayed, unreadByID: unreadByID, accountID: accountID)
+                mailboxesByAccount[accountID] = mailboxes
                 errorsByAccount[accountID] = nil
                 return
             } catch {

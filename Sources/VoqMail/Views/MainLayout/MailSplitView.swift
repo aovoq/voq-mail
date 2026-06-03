@@ -95,9 +95,7 @@ struct MainMailSplitView: View {
     private func loadAllLabels() {
         for account in accountStore.accounts {
             let id = account.id
-            labelStore.load(accountID: id) {
-                try await accountStore.accessToken(for: id)
-            }
+            labelStore.load(accountID: id, authorizer: accountStore)
         }
     }
 

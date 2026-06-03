@@ -59,7 +59,7 @@ final class SendStore {
     /// has superseded this one for the same account.
     func send(
         _ draft: MailDraft,
-        token: @escaping @Sendable () async throws -> String
+        authorizer: any GmailRequestAuthorizing
     ) async -> Bool {
         let accountID = draft.accountID
         generations[accountID, default: 0] += 1
@@ -67,8 +67,9 @@ final class SendStore {
         statesByAccount[accountID] = State(isSending: true, errorMessage: nil)
 
         do {
-            let accessToken = try await token()
-            try await sender.send(draft, accessToken: accessToken)
+            try await authorizer.performGmailRequest(for: accountID) { accessToken in
+                try await self.sender.send(draft, accessToken: accessToken)
+            }
             guard isCurrent(accountID, generation) else { return false }
             statesByAccount[accountID] = State(isSending: false, errorMessage: nil)
             return true
@@ -86,7 +87,8 @@ final class SendStore {
     /// A reader-facing send-failure line. A Gmail HTTP error is reduced to its
     /// status (the raw response body is too noisy for the composer); anything else
     /// falls back to the system-localized description.
-    private static func message(for error: Error) -> String {
+    private static func message(for error: Error) -> String? {
+        if (error as? OAuthError)?.requiresReauthentication == true { return nil }
         if case let GmailError.requestFailed(status, _) = error {
             return "Couldn't send the message (HTTP \(status)). Please try again."
         }

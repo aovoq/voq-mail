@@ -214,3 +214,13 @@ struct GmailClient {
 enum GmailError: Error {
     case requestFailed(status: Int, body: String)
 }
+
+extension GmailError {
+    /// Gmail uses 401 when a bearer access token is no longer accepted. Callers use
+    /// this as the boundary to drop the cached token, refresh once, and then surface
+    /// the account-level re-authentication prompt if retrying still fails.
+    var isUnauthorized: Bool {
+        if case let .requestFailed(status, _) = self { return status == 401 }
+        return false
+    }
+}

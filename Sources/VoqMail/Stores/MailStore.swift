@@ -73,12 +73,10 @@ final class MailStore {
 
     // MARK: - Loading
 
-    /// Loads the given mailbox's first page for its account. `token` supplies a
-    /// valid access token (it may refresh), so token failures are captured here
-    /// alongside fetch failures. Switching mailboxes clears the stale list before
-    /// the new load; switching accounts surfaces the new account's cached list
-    /// immediately (no flash) because `activeAccountID` is set synchronously.
-    func load(mailbox: Mailbox, token: @escaping @Sendable () async throws -> String) async {
+    /// Loads the given mailbox's first page for its account. `authorizer` owns token
+    /// refresh and the Gmail-401 retry path, so stale cached access tokens recover
+    /// before this store decides whether to surface a failure.
+    func load(mailbox: Mailbox, authorizer: any GmailRequestAuthorizing) async {
         let accountID = mailbox.accountID
         activeAccountID = accountID
 
@@ -101,10 +99,11 @@ final class MailStore {
         }
 
         do {
-            let accessToken = try await token()
-            let page = try await client.messages(
-                labelID: mailbox.gmailLabelID, maxResults: Self.pageSize,
-                pageToken: nil, concurrency: 5, accessToken: accessToken)
+            let page = try await authorizer.performGmailRequest(for: accountID) { accessToken in
+                try await self.client.messages(
+                    labelID: mailbox.gmailLabelID, maxResults: Self.pageSize,
+                    pageToken: nil, concurrency: 5, accessToken: accessToken)
+            }
             guard statesByAccount[accountID]?.loadGeneration == generation else { return }
             var s = state(for: accountID)
             s.messages = page.messages
@@ -130,15 +129,15 @@ final class MailStore {
     /// account is the active one: `load` sets `activeAccountID`, so reloading a
     /// non-visible account here would swap its messages under the current header.
     /// A non-active account's list reloads naturally when the user navigates to it.
-    func reloadActive(accountID: String, token: @escaping @Sendable () async throws -> String) async {
+    func reloadActive(accountID: String, authorizer: any GmailRequestAuthorizing) async {
         guard activeAccountID == accountID, let mailbox = state(for: accountID).loaded else { return }
-        await load(mailbox: mailbox, token: token)
+        await load(mailbox: mailbox, authorizer: authorizer)
     }
 
     /// Appends the next page to the account's current mailbox list. No-op when a
     /// load is in flight or there is no further page; stops paging once the token
     /// runs out.
-    func loadMore(accountID: String, token: @escaping @Sendable () async throws -> String) async {
+    func loadMore(accountID: String, authorizer: any GmailRequestAuthorizing) async {
         var s = state(for: accountID)
         guard !s.isLoading, !s.isLoadingMore,
               let mailbox = s.loaded,
@@ -155,10 +154,11 @@ final class MailStore {
         }
 
         do {
-            let accessToken = try await token()
-            let page = try await client.messages(
-                labelID: mailbox.gmailLabelID, maxResults: Self.pageSize,
-                pageToken: pageToken, concurrency: 5, accessToken: accessToken)
+            let page = try await authorizer.performGmailRequest(for: accountID) { accessToken in
+                try await self.client.messages(
+                    labelID: mailbox.gmailLabelID, maxResults: Self.pageSize,
+                    pageToken: pageToken, concurrency: 5, accessToken: accessToken)
+            }
             // A mailbox switch since this page was requested invalidates the append.
             guard statesByAccount[accountID]?.loadGeneration == generation else { return }
             var s = state(for: accountID)
@@ -182,15 +182,15 @@ final class MailStore {
 
     /// Flips the read state of a message in the given account, or no-ops if it is
     /// already in `read`.
-    func toggleRead(messageID: MailMessage.ID, accountID: String, token: @escaping @Sendable () async throws -> String) async {
+    func toggleRead(messageID: MailMessage.ID, accountID: String, authorizer: any GmailRequestAuthorizing) async {
         guard let message = state(for: accountID).messages.first(where: { $0.id == messageID }) else { return }
-        await setRead(!message.isRead, messageID: messageID, accountID: accountID, token: token)
+        await setRead(!message.isRead, messageID: messageID, accountID: accountID, authorizer: authorizer)
     }
 
     /// Sets a message read or unread by adding/removing Gmail's `UNREAD` label. The
     /// UI updates optimistically (bold flips immediately); a failed modify rolls the
     /// label set back. A no-op when the message is already in the requested state.
-    func setRead(_ read: Bool, messageID: MailMessage.ID, accountID: String, token: @escaping @Sendable () async throws -> String) async {
+    func setRead(_ read: Bool, messageID: MailMessage.ID, accountID: String, authorizer: any GmailRequestAuthorizing) async {
         var s = state(for: accountID)
         guard let index = s.messages.firstIndex(where: { $0.id == messageID }),
               s.messages[index].isRead != read else { return }
@@ -202,12 +202,13 @@ final class MailStore {
         statesByAccount[accountID] = s
 
         do {
-            let accessToken = try await token()
-            try await client.modifyLabels(
-                messageID: messageID,
-                addLabelIDs: read ? [] : ["UNREAD"],
-                removeLabelIDs: read ? ["UNREAD"] : [],
-                accessToken: accessToken)
+            try await authorizer.performGmailRequest(for: accountID) { accessToken in
+                try await self.client.modifyLabels(
+                    messageID: messageID,
+                    addLabelIDs: read ? [] : ["UNREAD"],
+                    removeLabelIDs: read ? ["UNREAD"] : [],
+                    accessToken: accessToken)
+            }
         } catch {
             // A cancellation (the message was deselected before the modify returned)
             // leaves the optimistic state in place rather than reverting it.
@@ -216,7 +217,9 @@ final class MailStore {
             if let index = s.messages.firstIndex(where: { $0.id == messageID }) {
                 s.messages[index].labelIds = previous
             }
-            s.errorMessage = String(describing: error)
+            if (error as? OAuthError)?.requiresReauthentication != true {
+                s.errorMessage = String(describing: error)
+            }
             statesByAccount[accountID] = s
         }
     }

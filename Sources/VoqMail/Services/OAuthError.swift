@@ -29,6 +29,9 @@ enum OAuthError: Error {
     /// trigger for the graceful re-authentication flow (issue #11) — distinct from
     /// `tokenRequestFailed` so a transient 5xx is never mistaken for a dead token.
     case refreshTokenExpired
+    /// Gmail rejected a freshly-refreshed access token with 401. This means retrying
+    /// the cached token cannot recover; the user needs to sign in again.
+    case accessTokenRejected
 }
 
 extension OAuthError {
@@ -38,7 +41,7 @@ extension OAuthError {
     /// error rather than retrying it or painting it over the mail UI.
     var requiresReauthentication: Bool {
         switch self {
-        case .refreshTokenExpired, .noRefreshToken: return true
+        case .refreshTokenExpired, .noRefreshToken, .accessTokenRejected: return true
         default: return false
         }
     }

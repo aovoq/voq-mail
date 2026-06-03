@@ -129,9 +129,7 @@ struct CustomSidebarList: View {
     /// re-runs its own backoff, so this just kicks it off again.
     private func retry(_ account: Account) {
         let id = account.id
-        labelStore.load(accountID: id) {
-            try await accountStore.accessToken(for: id)
-        }
+        labelStore.load(accountID: id, authorizer: accountStore)
     }
 
     /// The per-account group header showing the account's address. Tapping it

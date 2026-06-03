@@ -58,7 +58,7 @@ final class MessageContentStore {
     func load(
         message: MailMessage,
         accountID: String,
-        token: @escaping @Sendable () async throws -> String
+        authorizer: any GmailRequestAuthorizing
     ) async {
         guard !isShowing(accountID: accountID, messageID: message.id) || content == nil else { return }
         let requestedID = message.id
@@ -71,24 +71,29 @@ final class MessageContentStore {
         defer { if isCurrent(requestedAccountID, requestedID) { isLoading = false } }
 
         do {
-            let accessToken = try await token()
-            guard isCurrent(requestedAccountID, requestedID) else { return }
+            let loaded = try await authorizer.performGmailRequest(for: accountID) { accessToken in
+                guard self.isCurrent(requestedAccountID, requestedID) else { throw CancellationError() }
 
-            let full = try await client.fullMessage(id: requestedID, accessToken: accessToken)
-            guard isCurrent(requestedAccountID, requestedID) else { return }
+                let full = try await self.client.fullMessage(id: requestedID, accessToken: accessToken)
+                guard self.isCurrent(requestedAccountID, requestedID) else { throw CancellationError() }
 
-            let parsed = parser.parse(full)
-            var html = bodyHTML(from: parsed, fallback: message)
-            html = try await resolveInlineImages(
-                in: html, parsed: parsed, messageID: requestedID, accessToken: accessToken)
-            guard isCurrent(requestedAccountID, requestedID) else { return }
+                let parsed = self.parser.parse(full)
+                var html = self.bodyHTML(from: parsed, fallback: message)
+                html = try await self.resolveInlineImages(
+                    in: html, parsed: parsed, messageID: requestedID, accessToken: accessToken)
+                guard self.isCurrent(requestedAccountID, requestedID) else { throw CancellationError() }
 
-            let attachments = parsed.attachments
-                .filter { !$0.isInline }
-                .map(MailAttachment.init(parsed:))
-            content = MessageContent(html: html, attachments: attachments)
+                let attachments = parsed.attachments
+                    .filter { !$0.isInline }
+                    .map(MailAttachment.init(parsed:))
+                return MessageContent(html: html, attachments: attachments)
+            }
+            guard isCurrent(requestedAccountID, requestedID) else { return }
+            content = loaded
         } catch {
-            if isCurrent(requestedAccountID, requestedID) { errorMessage = String(describing: error) }
+            if isCurrent(requestedAccountID, requestedID), shouldSurface(error) {
+                errorMessage = String(describing: error)
+            }
         }
     }
 
@@ -97,7 +102,7 @@ final class MessageContentStore {
     func downloadAttachment(
         _ attachment: MailAttachment,
         accountID: String,
-        token: @escaping @Sendable () async throws -> String
+        authorizer: any GmailRequestAuthorizing
     ) async {
         guard attachment.localFileURL == nil,
               let attachmentId = attachment.attachmentId,
@@ -109,11 +114,12 @@ final class MessageContentStore {
         defer { downloadingAttachmentIDs.remove(attachment.id) }
 
         do {
-            let accessToken = try await token()
-            let data = try await client.attachmentData(
-                messageID: messageID, attachmentId: attachmentId, accessToken: accessToken)
-            let url = try Self.writeTempFile(
-                data: data, accountID: accountID, messageID: messageID, filename: attachment.filename)
+            let url = try await authorizer.performGmailRequest(for: accountID) { accessToken in
+                let data = try await self.client.attachmentData(
+                    messageID: messageID, attachmentId: attachmentId, accessToken: accessToken)
+                return try Self.writeTempFile(
+                    data: data, accountID: accountID, messageID: messageID, filename: attachment.filename)
+            }
 
             // Apply only if the same message in the same account is still open.
             guard loadedAccountID == accountID, loadedMessageID == messageID,
@@ -123,7 +129,7 @@ final class MessageContentStore {
             }
             content = MessageContent(html: current.html, attachments: updated)
         } catch {
-            errorMessage = String(describing: error)
+            if shouldSurface(error) { errorMessage = String(describing: error) }
         }
     }
 
@@ -196,4 +202,11 @@ final class MessageContentStore {
         try data.write(to: url, options: .atomic)
         return url
     }
+}
+
+private func shouldSurface(_ error: Error) -> Bool {
+    if error is CancellationError { return false }
+    if (error as? OAuthError)?.requiresReauthentication == true { return false }
+    let nsError = error as NSError
+    return !(nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled)
 }

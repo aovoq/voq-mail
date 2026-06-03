@@ -154,18 +154,13 @@ struct MailboxDetail: View {
 
     private func loadMessagesIfNeeded() async {
         guard let mailbox else { return }
-        let accountID = mailbox.accountID
-        await mailStore.load(mailbox: mailbox) {
-            try await accountStore.accessToken(for: accountID)
-        }
+        await mailStore.load(mailbox: mailbox, authorizer: accountStore)
     }
 
     private func loadMore() async {
         guard let mailbox else { return }
         let accountID = mailbox.accountID
-        await mailStore.loadMore(accountID: accountID) {
-            try await accountStore.accessToken(for: accountID)
-        }
+        await mailStore.loadMore(accountID: accountID, authorizer: accountStore)
     }
 
     private func loadSelectedContent() async {
@@ -173,27 +168,20 @@ struct MailboxDetail: View {
         let accountID = message.accountID
         // Opening a message marks it read; the user can flip it back from the header.
         if !message.isRead {
-            await mailStore.setRead(true, messageID: message.id, accountID: accountID) {
-                try await accountStore.accessToken(for: accountID)
-            }
+            await mailStore.setRead(
+                true, messageID: message.id, accountID: accountID, authorizer: accountStore)
         }
-        await contentStore.load(message: message, accountID: accountID) {
-            try await accountStore.accessToken(for: accountID)
-        }
+        await contentStore.load(message: message, accountID: accountID, authorizer: accountStore)
     }
 
     private func toggleRead(_ message: MailMessage) async {
         let accountID = message.accountID
-        await mailStore.toggleRead(messageID: message.id, accountID: accountID) {
-            try await accountStore.accessToken(for: accountID)
-        }
+        await mailStore.toggleRead(messageID: message.id, accountID: accountID, authorizer: accountStore)
     }
 
     private func downloadAttachment(_ attachment: MailAttachment) async {
         guard let accountID = selectedMessage?.accountID else { return }
-        await contentStore.downloadAttachment(attachment, accountID: accountID) {
-            try await accountStore.accessToken(for: accountID)
-        }
+        await contentStore.downloadAttachment(attachment, accountID: accountID, authorizer: accountStore)
     }
 
     private func reply(to message: MailMessage) {
@@ -207,14 +195,11 @@ struct MailboxDetail: View {
     }
 
     /// Builds and sends the draft via the per-account SendStore, then closes the
-    /// sheet on success. On failure the sheet stays open with the error shown so
-    /// the user can fix and retry. The store drops a stale completion (issue #8),
-    /// so closing the sheet is gated on success belonging to the live draft.
+    /// sheet on success. On failure the sheet stays open; recoverable auth failures
+    /// are routed to the shared re-auth banner. The store drops a stale completion
+    /// (issue #8), so closing the sheet is gated on success belonging to the live draft.
     private func send(_ draft: MailDraft) async {
-        let accountID = draft.accountID
-        let succeeded = await sendStore.send(draft) {
-            try await accountStore.accessToken(for: accountID)
-        }
+        let succeeded = await sendStore.send(draft, authorizer: accountStore)
         if succeeded, activeDraft?.id == draft.id {
             activeDraft = nil
         }

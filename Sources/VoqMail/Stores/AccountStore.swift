@@ -11,9 +11,20 @@
 import Foundation
 import Observation
 
+/// Runs Gmail API calls with account-owned token recovery. The generic method lets
+/// each store keep its Gmail-specific result type while centralizing the 401 →
+/// refresh → re-authentication decision in AccountStore.
+@MainActor
+protocol GmailRequestAuthorizing: AnyObject {
+    func performGmailRequest<T>(
+        for email: String,
+        _ operation: @MainActor @escaping @Sendable (String) async throws -> T
+    ) async throws -> T
+}
+
 @Observable
 @MainActor
-final class AccountStore {
+final class AccountStore: GmailRequestAuthorizing {
     /// Accounts shown as signed in.
     private(set) var accounts: [Account] = []
     /// True while a consent flow is in progress (drives the button state).
@@ -135,17 +146,42 @@ final class AccountStore {
     /// A valid access token for an account, for use by Gmail API calls (#4+). This
     /// is the single point every token refresh passes through, so a refresh that
     /// finds the stored credential dead (expired/revoked/missing) flags the account
-    /// here — no caller can swallow that silently (issue #11); a good token clears
-    /// the flag. (A still-valid *cached* access token that the server later rejects
-    /// with a 401 surfaces on the next refresh, once the cache lapses.)
+    /// here — no caller can swallow that silently (issue #11).
     func accessToken(for email: String) async throws -> String {
         do {
-            let token = try await tokenProvider.accessToken(for: email)
-            if accountsNeedingReauth.contains(email) { accountsNeedingReauth.remove(email) }
-            return token
+            return try await tokenProvider.accessToken(for: email)
         } catch let error as OAuthError where error.requiresReauthentication {
             accountsNeedingReauth.insert(email)
             throw error
+        }
+    }
+
+    /// Executes one Gmail API operation. If Gmail rejects the cached access token
+    /// with 401, drop that cache entry, refresh once, and retry the operation. If
+    /// refresh proves the credential is gone, or Gmail still rejects the fresh token,
+    /// flag the account for the shared re-authentication UI instead of leaving the
+    /// individual store to paint a raw HTTP error.
+    func performGmailRequest<T>(
+        for email: String,
+        _ operation: @MainActor @escaping @Sendable (String) async throws -> T
+    ) async throws -> T {
+        let token = try await accessToken(for: email)
+        do {
+            let result = try await operation(token)
+            accountsNeedingReauth.remove(email)
+            return result
+        } catch let error as GmailError where error.isUnauthorized {
+            await tokenProvider.clearCache(for: email)
+            let refreshed = try await accessToken(for: email)
+            do {
+                let result = try await operation(refreshed)
+                accountsNeedingReauth.remove(email)
+                return result
+            } catch let retryError as GmailError where retryError.isUnauthorized {
+                await tokenProvider.clearCache(for: email)
+                accountsNeedingReauth.insert(email)
+                throw OAuthError.accessTokenRejected
+            }
         }
     }
 
