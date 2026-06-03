@@ -52,6 +52,22 @@ final class LabelStore {
         }
     }
 
+    /// Reloads an account's labels *in place*. Used after a re-auth so the sidebar
+    /// recovers from its error state on its own (issue #11). Unlike `purge` + `load`
+    /// it keeps the current mailboxes visible until the fresh ones overwrite them —
+    /// nil-ing them first would briefly drop the account from `allMailboxes` and
+    /// bounce the user off the mailbox they were viewing. Cancels any in-flight load
+    /// and bumps the generation so a stale result can't write back.
+    func reload(accountID: String, token: @escaping @Sendable () async throws -> String) {
+        loadTasks[accountID]?.cancel()
+        loadingAccountIDs.remove(accountID)
+        loadGenerationByAccount[accountID, default: 0] &+= 1
+        loadTasks[accountID] = Task { [weak self] in
+            await self?.loadLabels(accountID: accountID, token: token)
+            self?.loadTasks[accountID] = nil
+        }
+    }
+
     /// Whether the given account's labels are currently loading.
     func isLoading(for accountID: String) -> Bool {
         loadingAccountIDs.contains(accountID)
@@ -115,6 +131,10 @@ final class LabelStore {
                 // or the task itself (CancellationError). The restart reloads, so
                 // swallow it rather than retrying or flashing a red error.
                 if error is CancellationError || (error as? URLError)?.code == .cancelled { return }
+                // A lapsed credential is owned by the re-auth banner (issue #11):
+                // don't burn the backoff retrying a refresh that can't recover, and
+                // don't paint a red sidebar error competing with the banner.
+                if (error as? OAuthError)?.requiresReauthentication == true { return }
                 guard (loadGenerationByAccount[accountID] ?? 0) == generation else { return }
                 // Out of attempts: surface the error so the Retry button appears.
                 guard attempt < Self.maxLoadAttempts else {

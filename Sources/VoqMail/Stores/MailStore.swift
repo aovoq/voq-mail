@@ -114,13 +114,25 @@ final class MailStore {
             statesByAccount[accountID] = s
         } catch {
             // A cancellation is the expected outcome of switching mailboxes mid-load;
-            // only a still-current, non-cancelled failure is worth surfacing.
+            // a lapsed token is already surfaced by the re-auth banner (issue #11).
+            // Only a still-current failure that's neither is worth surfacing here.
             guard statesByAccount[accountID]?.loadGeneration == generation,
-                  !isCancellation(error) else { return }
+                  shouldSurface(error) else { return }
             var s = state(for: accountID)
             s.errorMessage = String(describing: error)
             statesByAccount[accountID] = s
         }
+    }
+
+    /// Reloads the account's currently-loaded mailbox from scratch. Used after a
+    /// re-auth so the message list recovers on its own, without the user having to
+    /// switch mailboxes to re-fire the view's load (issue #11). A no-op unless this
+    /// account is the active one: `load` sets `activeAccountID`, so reloading a
+    /// non-visible account here would swap its messages under the current header.
+    /// A non-active account's list reloads naturally when the user navigates to it.
+    func reloadActive(accountID: String, token: @escaping @Sendable () async throws -> String) async {
+        guard activeAccountID == accountID, let mailbox = state(for: accountID).loaded else { return }
+        await load(mailbox: mailbox, token: token)
     }
 
     /// Appends the next page to the account's current mailbox list. No-op when a
@@ -159,7 +171,7 @@ final class MailStore {
             statesByAccount[accountID] = s
         } catch {
             guard statesByAccount[accountID]?.loadGeneration == generation,
-                  !isCancellation(error) else { return }
+                  shouldSurface(error) else { return }
             var s = state(for: accountID)
             s.errorMessage = String(describing: error)
             statesByAccount[accountID] = s
@@ -216,4 +228,12 @@ private func isCancellation(_ error: Error) -> Bool {
     if error is CancellationError { return true }
     let nsError = error as NSError
     return nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled
+}
+
+/// Whether a load failure is worth showing in the list. Cancellations are
+/// expected churn; a lapsed credential is owned by the re-auth banner (issue
+/// #11), so neither should paint a red error over the messages.
+private func shouldSurface(_ error: Error) -> Bool {
+    if (error as? OAuthError)?.requiresReauthentication == true { return false }
+    return !isCancellation(error)
 }
