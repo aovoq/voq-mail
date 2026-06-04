@@ -133,6 +133,82 @@ struct GmailClient {
         let size: Int?
     }
 
+    /// The account-level `historyId` from `users.getProfile` (issue #13). Used to seed
+    /// the sync checkpoint when a full load returned no messages to seed from.
+    func profileHistoryId(accessToken: String) async throws -> String? {
+        let data = try await get(URL(string: "\(Self.usersBase)/profile")!, accessToken: accessToken)
+        return try JSONDecoder().decode(GmailProfile.self, from: data).historyId
+    }
+
+    /// One page of `users.history.list` from a checkpoint (issue #13). Scoped to the
+    /// four change kinds incremental sync applies. A `startHistoryId` older than
+    /// Gmail's retention (~a week) yields a 404, surfaced as
+    /// `GmailError.requestFailed(status: 404, …)` for the caller's full-resync
+    /// fallback. `pageToken` walks a multi-page diff; `nil` requests the first page.
+    func history(
+        startHistoryId: String, pageToken: String?, accessToken: String
+    ) async throws -> GmailHistoryList {
+        var components = URLComponents(string: "\(Self.usersBase)/history")!
+        components.queryItems = [
+            .init(name: "startHistoryId", value: startHistoryId),
+            .init(name: "historyTypes", value: "messageAdded"),
+            .init(name: "historyTypes", value: "messageDeleted"),
+            .init(name: "historyTypes", value: "labelAdded"),
+            .init(name: "historyTypes", value: "labelRemoved"),
+        ]
+        if let pageToken {
+            components.queryItems?.append(.init(name: "pageToken", value: pageToken))
+        }
+        let data = try await get(components.url!, accessToken: accessToken)
+        return try JSONDecoder().decode(GmailHistoryList.self, from: data)
+    }
+
+    /// Fetches metadata for several message ids at once, capped at `concurrency`
+    /// in-flight gets (the same bounded window list rows use). Used to hydrate the
+    /// messages a history diff reports as newly added (issue #13).
+    ///
+    /// A per-id **404** is tolerated — that message was deleted server-side after the
+    /// history snapshot, so it is simply omitted rather than failing the batch (or
+    /// blocking the sync checkpoint forever on a message that no longer exists). Any
+    /// **other** failure (transient 5xx, network, 401) propagates so the caller can
+    /// leave its checkpoint un-advanced and retry the same diff, rather than skipping
+    /// genuinely-new mail. Order is not preserved.
+    func messagesMetadata(
+        ids: [String], concurrency: Int, accessToken: String
+    ) async throws -> [GmailMessage] {
+        guard !ids.isEmpty else { return [] }
+        return try await withThrowingTaskGroup(of: GmailMessage?.self) { group in
+            var results: [GmailMessage] = []
+            var next = 0
+            let window = max(1, min(concurrency, ids.count))
+            for _ in 0..<window {
+                let id = ids[next]
+                next += 1
+                group.addTask { try await self.metadataTolerating404(id: id, accessToken: accessToken) }
+            }
+            while let value = try await group.next() {
+                if let value { results.append(value) }
+                if next < ids.count {
+                    let id = ids[next]
+                    next += 1
+                    group.addTask { try await self.metadataTolerating404(id: id, accessToken: accessToken) }
+                }
+            }
+            return results
+        }
+    }
+
+    /// One message's metadata, mapping a 404 (message gone) to `nil` and rethrowing
+    /// every other failure. The 404-vs-transient distinction is what lets a history
+    /// diff skip a just-deleted message without dropping the rest on a transient blip.
+    private func metadataTolerating404(id: String, accessToken: String) async throws -> GmailMessage? {
+        do {
+            return try await messageMetadata(id: id, accessToken: accessToken)
+        } catch let GmailError.requestFailed(status, _) where status == 404 {
+            return nil
+        }
+    }
+
     /// Lists one page of a label's messages and fetches each one's metadata, capped
     /// at `concurrency` in-flight requests. Results preserve the list order; the
     /// returned token feeds the next `messages(…)` call (`nil` when exhausted).
@@ -213,4 +289,22 @@ struct GmailClient {
 
 enum GmailError: Error {
     case requestFailed(status: Int, body: String)
+}
+
+extension GmailError {
+    /// Gmail uses 401 when a bearer access token is no longer accepted. Callers use
+    /// this as the boundary to drop the cached token, refresh once, and then surface
+    /// the account-level re-authentication prompt if retrying still fails.
+    var isUnauthorized: Bool {
+        if case let .requestFailed(status, _) = self { return status == 401 }
+        return false
+    }
+
+    /// Gmail returns 404 from `users.history.list` when `startHistoryId` predates its
+    /// (~1 week) history retention. The boundary at which incremental sync gives up
+    /// and falls back to a full re-sync (issue #13).
+    var isHistoryGone: Bool {
+        if case let .requestFailed(status, _) = self { return status == 404 }
+        return false
+    }
 }

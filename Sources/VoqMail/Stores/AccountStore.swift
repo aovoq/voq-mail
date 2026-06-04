@@ -11,9 +11,20 @@
 import Foundation
 import Observation
 
+/// Runs Gmail API calls with account-owned token recovery. The generic method lets
+/// each store keep its Gmail-specific result type while centralizing the 401 →
+/// refresh → re-authentication decision in AccountStore.
+@MainActor
+protocol GmailRequestAuthorizing: AnyObject {
+    func performGmailRequest<T>(
+        for email: String,
+        _ operation: @MainActor @escaping @Sendable (String) async throws -> T
+    ) async throws -> T
+}
+
 @Observable
 @MainActor
-final class AccountStore {
+final class AccountStore: GmailRequestAuthorizing {
     /// Accounts shown as signed in.
     private(set) var accounts: [Account] = []
     /// True while a consent flow is in progress (drives the button state).
@@ -92,16 +103,31 @@ final class AccountStore {
     /// account that fails to restore does not block the others.
     func restoreAccounts() async {
         do {
-            for email in try keychain.storedAccountEmails() {
+            let emails = try keychain.storedAccountEmails()
+            // Show the saved accounts immediately from their Keychain emails (the
+            // account id) so the sidebar labels and message list can paint from the
+            // cache without waiting on the network (issue #12). The refresh below then
+            // confirms each credential and corrects the display address.
+            for email in emails { upsert(Account(email: email, displayName: nil)) }
+            for email in emails {
+                // The provisional upsert above makes the account removable before its
+                // refresh/profile fetch finishes. If the user removed it during a prior
+                // iteration's await, skip it — re-upserting would resurrect an account
+                // whose Keychain item and caches were just purged (issue #8/#12).
+                guard accounts.contains(where: { $0.id == email }) else { continue }
                 do {
                     let token = try await accessToken(for: email)
                     let address = try await profiles.emailAddress(accessToken: token)
+                    // Re-check after the awaits: removal may have happened during them.
+                    guard accounts.contains(where: { $0.id == email }) else { continue }
                     upsert(Account(email: address, displayName: nil))
                 } catch let error as OAuthError where error.requiresReauthentication {
                     // The saved credential lapsed (Testing-mode 7-day expiry, revoked,
                     // or missing). Keep the account visible and flagged — `accessToken`
                     // already added it to `accountsNeedingReauth` — so the UI prompts a
-                    // re-login instead of the account silently vanishing (issue #11).
+                    // re-login instead of the account silently vanishing (issue #11) —
+                    // unless it was removed mid-restore, in which case stay removed.
+                    guard accounts.contains(where: { $0.id == email }) else { continue }
                     upsert(Account(email: email, displayName: nil))
                 } catch {
                     lastError = String(describing: error)
@@ -135,17 +161,47 @@ final class AccountStore {
     /// A valid access token for an account, for use by Gmail API calls (#4+). This
     /// is the single point every token refresh passes through, so a refresh that
     /// finds the stored credential dead (expired/revoked/missing) flags the account
-    /// here — no caller can swallow that silently (issue #11); a good token clears
-    /// the flag. (A still-valid *cached* access token that the server later rejects
-    /// with a 401 surfaces on the next refresh, once the cache lapses.)
+    /// here — no caller can swallow that silently (issue #11).
     func accessToken(for email: String) async throws -> String {
         do {
-            let token = try await tokenProvider.accessToken(for: email)
-            if accountsNeedingReauth.contains(email) { accountsNeedingReauth.remove(email) }
-            return token
+            return try await tokenProvider.accessToken(for: email)
         } catch let error as OAuthError where error.requiresReauthentication {
-            accountsNeedingReauth.insert(email)
+            // Don't flag an account that is no longer signed in — e.g. one removed
+            // during a launch restore that was still awaiting its token — or the flag
+            // would orphan a row that no longer exists (issue #8).
+            if accounts.contains(where: { $0.id == email }) {
+                accountsNeedingReauth.insert(email)
+            }
             throw error
+        }
+    }
+
+    /// Executes one Gmail API operation. If Gmail rejects the cached access token
+    /// with 401, drop that cache entry, refresh once, and retry the operation. If
+    /// refresh proves the credential is gone, or Gmail still rejects the fresh token,
+    /// flag the account for the shared re-authentication UI instead of leaving the
+    /// individual store to paint a raw HTTP error.
+    func performGmailRequest<T>(
+        for email: String,
+        _ operation: @MainActor @escaping @Sendable (String) async throws -> T
+    ) async throws -> T {
+        let token = try await accessToken(for: email)
+        do {
+            let result = try await operation(token)
+            accountsNeedingReauth.remove(email)
+            return result
+        } catch let error as GmailError where error.isUnauthorized {
+            await tokenProvider.clearCache(for: email)
+            let refreshed = try await accessToken(for: email)
+            do {
+                let result = try await operation(refreshed)
+                accountsNeedingReauth.remove(email)
+                return result
+            } catch let retryError as GmailError where retryError.isUnauthorized {
+                await tokenProvider.clearCache(for: email)
+                accountsNeedingReauth.insert(email)
+                throw OAuthError.accessTokenRejected
+            }
         }
     }
 

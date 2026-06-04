@@ -9,12 +9,16 @@
 //
 
 import AppKit
+import SwiftData
 import SwiftUI
 
 @main
 struct VoqMailApp: App {
     // Bridges an AppKit application delegate into the SwiftUI app lifecycle.
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    // The on-disk SwiftData cache (issue #12). Built once; handed to ContentView so
+    // the stores can attach its main context before the first load.
+    @State private var modelContainer = VoqMailApp.makeModelContainer()
     @State private var sidebarModel = SidebarModel()
     @State private var navigation = AppNavigation()
     @State private var accountStore = AccountStore()
@@ -40,9 +44,11 @@ struct VoqMailApp: App {
                 labelStore: labelStore,
                 contentStore: contentStore,
                 sendStore: sendStore,
-                replyAssistStore: replyAssistStore)  // reply-assist:
+                replyAssistStore: replyAssistStore,  // reply-assist:
+                modelContainer: modelContainer)
                 .frame(minWidth: WindowMetrics.minSize.width, minHeight: WindowMetrics.minSize.height)
         }
+        .modelContainer(modelContainer)
         .defaultSize(width: WindowMetrics.defaultSize.width, height: WindowMetrics.defaultSize.height)
         .windowStyle(.hiddenTitleBar)
         .commands {
@@ -58,6 +64,31 @@ struct VoqMailApp: App {
                     .keyboardShortcut("b", modifiers: .command)
             }
         }
+    }
+
+    /// Builds the on-disk message/label cache (issue #12). The store lives in
+    /// Application Support, never in the `.app` bundle — `build_and_run.sh` deletes
+    /// and re-signs the bundle every run, so a store inside it would be wiped (and a
+    /// signed bundle is read-only). The cache holds no secrets (refresh tokens stay
+    /// in the Keychain), so on an open/migration failure it is recreated destructively
+    /// rather than carrying a migration plan: the network refills it on next launch.
+    private static func makeModelContainer() -> ModelContainer {
+        let schema = Schema([CachedMessage.self, CachedLabel.self, SyncState.self])
+        let storeURL = URL.applicationSupportDirectory.appending(path: "VoqMail/cache.store")
+        try? FileManager.default.createDirectory(
+            at: storeURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let config = ModelConfiguration(schema: schema, url: storeURL)
+        if let container = try? ModelContainer(for: schema, configurations: config) {
+            return container
+        }
+        // Incompatible / corrupt store: delete and retry once.
+        try? FileManager.default.removeItem(at: storeURL)
+        if let container = try? ModelContainer(for: schema, configurations: config) {
+            return container
+        }
+        // Last resort: in-memory, so the app still launches (no persistence this run).
+        let memory = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+        return try! ModelContainer(for: schema, configurations: memory)
     }
 }
 

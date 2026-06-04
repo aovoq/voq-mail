@@ -73,6 +73,49 @@ struct GmailLabelList: Decodable {
     let labels: [GmailLabel]?
 }
 
+/// `users.getProfile` response, reduced to the account-level `historyId` (issue #13).
+/// Used to seed the sync checkpoint when the first loaded mailbox is empty and so
+/// carries no message-level historyId to seed from. (The address is read elsewhere
+/// by `GmailProfileService`; this slice only needs the checkpoint.)
+struct GmailProfile: Decodable {
+    let historyId: String?
+}
+
+/// `users.history.list` response (issue #13). Carries the diff records since the
+/// requested `startHistoryId`, the newest `historyId` (the next checkpoint), and a
+/// `nextPageToken` when the diff spans multiple pages.
+struct GmailHistoryList: Decodable {
+    let history: [GmailHistory]?
+    let historyId: String?
+    let nextPageToken: String?
+}
+
+/// One history record. Each change kind carries the affected message resource.
+/// Label changes can omit the message's full `labelIds`; in that case their own
+/// `labelIds` are the labels that moved and must be applied as a delta.
+struct GmailHistory: Decodable {
+    let id: String
+    let messagesAdded: [MessageChange]?
+    let messagesDeleted: [MessageChange]?
+    let labelsAdded: [LabelChange]?
+    let labelsRemoved: [LabelChange]?
+
+    struct MessageRef: Decodable {
+        let id: String
+        let threadId: String?
+        let labelIds: [String]?
+    }
+
+    struct MessageChange: Decodable {
+        let message: MessageRef
+    }
+
+    struct LabelChange: Decodable {
+        let message: MessageRef
+        let labelIds: [String]?
+    }
+}
+
 /// A Gmail label. `users.labels.list` populates only id/name/type; the unread and
 /// total counts are filled in only by `users.labels.get` (issue #6 fetches those
 /// per displayed label), so the count fields are optional. Note Gmail counts both
