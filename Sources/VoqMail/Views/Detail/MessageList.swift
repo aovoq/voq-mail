@@ -83,8 +83,22 @@ private struct MessageRow: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(2)
+                // Reserve the dot's footprint (always, so read/unread don't
+                // reflow) so the preview's trailing end never slides under it.
+                .padding(.trailing, Metrics.unreadDotSize + Metrics.unreadDotInset * 2)
         }
         .padding(.vertical, 5)
+        // Unread dot, tucked into the row's bottom-right corner. Faded out (not
+        // removed) when read so the row's layout never shifts between states.
+        .overlay(alignment: .bottomTrailing) {
+            Circle()
+                .fill(Color.accentColor)
+                .frame(width: Metrics.unreadDotSize, height: Metrics.unreadDotSize)
+                .padding(Metrics.unreadDotInset)
+                .opacity(message.isRead ? 0 : 1)
+                .accessibilityHidden(message.isRead)
+                .accessibilityLabel("Unread")
+        }
         .contentShape(Rectangle())
     }
 }

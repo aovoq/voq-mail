@@ -74,6 +74,13 @@ enum Metrics {
     /// A selectable row's HStack spacing and its inner horizontal padding — the
     /// same value, kept in one place so those three rows line their content up.
     static let sidebarRowContentSpacing: CGFloat = 10
+
+    // Message list rows
+    /// Diameter of the unread dot in a message row's bottom-trailing corner.
+    /// Bold text alone reads as too subtle, so unread rows also carry this badge.
+    static let unreadDotSize: CGFloat = 8
+    /// Inset that keeps the unread dot clear of the row's bottom-right corner.
+    static let unreadDotInset: CGFloat = 4
 }
 
 // MARK: - Settings
