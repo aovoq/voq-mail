@@ -56,7 +56,9 @@ final class LabelStore {
     /// the labels are already loaded or a load is already in flight; call again
     /// after an error to retry.
     func load(accountID: String, authorizer: any GmailRequestAuthorizing) {
-        guard mailboxesByAccount[accountID] == nil, loadTasks[accountID] == nil else { return }
+        let needsInitialLoad = mailboxesByAccount[accountID] == nil
+        let needsErrorRetry = errorsByAccount[accountID] != nil
+        guard (needsInitialLoad || needsErrorRetry), loadTasks[accountID] == nil else { return }
         loadTasks[accountID] = Task { [weak self] in
             await self?.loadLabels(accountID: accountID, authorizer: authorizer)
             self?.loadTasks[accountID] = nil

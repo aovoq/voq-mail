@@ -97,7 +97,7 @@ struct CustomSidebarList: View {
                     .padding(.top, 6)
             }
 
-            if let error = labelStore.error(for: account.id), mailboxes.isEmpty {
+            if let error = labelStore.error(for: account.id) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(error)
                         .font(.caption)
